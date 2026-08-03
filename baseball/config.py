@@ -3,7 +3,7 @@
 WIDTH, HEIGHT = 960, 720
 FPS = 60
 TITLE = "히팅카운트"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 DEVELOPER = "최정우"
 DEVELOPER_EMAIL = "jwoochoi2001@naver.com"
 
@@ -36,9 +36,9 @@ ACCENT2 = (255, 196, 60)      # 노랑
 GOOD = (86, 200, 120)         # 초록
 BLUE = (72, 140, 236)
 
-# 팀 색상 (팀0=원정·파랑, 팀1=홈·빨강)
-TEAM_HOME = (240, 84, 68)
-TEAM_AWAY = (72, 140, 236)
+# 팀 색상 (팀0=원정·빨강, 팀1=홈·네이비)
+TEAM_HOME = (36, 72, 156)
+TEAM_AWAY = (231, 76, 60)
 TEAM_COLORS = (TEAM_AWAY, TEAM_HOME)
 
 # ------------------------------------------------------------------ 게임 규칙
@@ -89,4 +89,16 @@ SOLO_RUN_POINTS = 50
 # 2인 모드 기본 라인업(1~9번). 사용자가 자유롭게 바꿀 수 있다.
 DEFAULT_LINEUP = [f"플레이어{i}" for i in range(1, 10)]
 # 좌타/우타 기본값 (True = 우타)
-DEFAULT_RIGHT = [True, True, True, False, False, False, True, False, True]
+DEFAULT_RIGHT = [True] * 9
+
+# 2인 모드 원정팀(AWAY) 기본 라인업·좌우타·선발투수
+DEFAULT_LINEUP_AWAY = [f"플레이어{i}" for i in range(1, 10)]
+DEFAULT_RIGHT_AWAY = [True] * 9
+DEFAULT_PITCHER_AWAY = "플레이어10"
+DEFAULT_PITCHER_RIGHT_AWAY = True  # 우투
+
+# 2인 모드 홈팀(HOME) 기본 라인업·좌우타·선발투수
+DEFAULT_LINEUP_HOME = [f"플레이어{i}" for i in range(1, 10)]
+DEFAULT_RIGHT_HOME = [True] * 9
+DEFAULT_PITCHER_HOME = "플레이어10"
+DEFAULT_PITCHER_RIGHT_HOME = True  # 우투

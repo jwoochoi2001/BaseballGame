@@ -41,8 +41,9 @@ class LiveGame:
         self.game_tied = False
         # 팀별 좌우타 정보
         self.right = [list(C.DEFAULT_RIGHT), list(C.DEFAULT_RIGHT)]
-        # 팀별 선발투수 이름(표시용, 실제 투구 로직에는 영향 없음)
+        # 팀별 선발투수 이름·투구 손(표시용, 실제 투구 로직에는 영향 없음)
         self.pitchers = ["", ""]
+        self.pitcher_right = [True, True]
 
         if one_player:
             self.batting_team = 1
@@ -400,6 +401,7 @@ THROW_SPEED = 115.0          # 송구 속도(ft/s)
 FIELDER_SPEED = 27.0         # 수비 이동 속도(ft/s)
 RELEASE = 0.55               # 포구 후 송구까지 지연
 CATCH_TIME_CAP = 2.55        # 낙구 지점까지 달릴 수 있는 시간 상한
+PITCHER_GROUND_REACH_FT = 6.0  # 투수 땅볼 수비 폭(정면 강습타만, 좌우로 넓게 못 감)
 
 INFIELDERS = ("투수", "1루수", "2루수", "유격수", "3루수")
 INFIELDER_SET = frozenset(INFIELDERS)
@@ -518,6 +520,11 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
             t = proj / ballspeed
             # 강한 타구일수록 옆을 빠르게 지나가 잡기 어려움(3-유간/1-2루간)
             reach = FIELDER_SPEED * t + 8 - power * 4
+            if name == "투수":
+                # 투수는 홈 정면축 바로 위에 있어 perp 가 항상 작게 나와
+                # 그대로 두면 '가장 가까운 수비수' 판정에서 거의 항상 이겨버린다.
+                # 실제로는 마운드 정면 강습타만 잡을 수 있으므로 커버 폭을 좁힌다.
+                reach = min(reach, PITCHER_GROUND_REACH_FT)
             if perp <= reach:
                 can.append((proj, name, t))
         if can:
@@ -617,6 +624,15 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
     if F.is_foul_point(land):
         return _foul_plan(land)
 
+    # 강한 직선타가 내야수 정면으로 향하면 정면 캐치(내야 직선타 아웃)
+    if liner:
+        snag = _infield_liner_snag(spray_deg, carry)
+        if snag:
+            return dict(kind="out", label=f"{snag} 직선타 아웃!",
+                        ball_type="liner", landing=F.FIELDERS_HOME[snag],
+                        field_by=snag, throw_to=None, bases=0, outs=1,
+                        double_play=False, sac_fly=False, error=False)
+
     # 짧은 라이너: 내야수가 먼저 처리(내야 직선타 vs 땅볼과 별도)
     if liner and carry < 175:
         ifield = {n: F.FIELDERS_HOME[n] for n in INFIELDERS}
@@ -651,6 +667,33 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
     return dict(kind="hit", label=label, ball_type="fly", landing=land,
                 field_by=best, throw_to=None, bases=bases_n, outs=0,
                 double_play=False, sac_fly=False, error=False)
+
+
+_LINER_SNAG_FIELDERS = ("1루수", "2루수", "유격수", "3루수")
+_LINER_SNAG_PERP_FT = 2.7
+
+
+def _infield_liner_snag(spray_deg, carry):
+    """강한 직선타의 궤적이 내야수 정면 근처를 지나가면 정면에서 캐치해 아웃.
+
+    (하드히트 직선타는 원래 뻗어나가는 거리가 멀어 '뛰어가서 잡는' 판정으로는
+    내야수가 절대 따라잡을 수 없다 — 실제로는 정면으로 오는 타구를 서서 잡는
+    경우이므로 궤적과 수비수 위치의 수직거리로 따로 판정한다.)
+    """
+    rad = math.radians(spray_deg)
+    dx, dy = math.sin(rad), math.cos(rad)
+    best_name, best_perp = None, 1e9
+    for name in _LINER_SNAG_FIELDERS:
+        px, py = F.FIELDERS_HOME[name]
+        proj = px * dx + py * dy
+        if proj <= 10 or proj > carry:
+            continue
+        perp = abs(px * dy - py * dx)
+        if perp < best_perp:
+            best_perp, best_name = perp, name
+    if best_name is not None and best_perp <= _LINER_SNAG_PERP_FT:
+        return best_name
+    return None
 
 
 def _outfielder_for(spray_deg):

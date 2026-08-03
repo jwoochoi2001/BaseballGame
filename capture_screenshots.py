@@ -190,7 +190,12 @@ def capture_all():
     g.walks = [3, 2]
     _fill_lines(g, [2, 1, 0, 1, 1, 1, 0, 0, 0], [1, 0, 1, 0, 0, 1, 0, 0, 0])
     g.batter_stats[0][1] = {"ab": 4, "h": 3, "hr": 1, "rbi": 4}
-    _save(GameOverScene(app, g), "17_gameover_win_away.png")
+    over_scene = GameOverScene(app, g)
+    _save(over_scene, "17_gameover_win_away.png")
+
+    # 2인 — 기록(타자 기록표)
+    over_scene.show_stats = True
+    _save(over_scene, "17b_boxscore.png")
 
     # 2인 — 홈 승리
     g = _make_2p_game()

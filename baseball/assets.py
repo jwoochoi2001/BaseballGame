@@ -14,9 +14,17 @@ _FONT_CANDIDATES = [
     "C:/Windows/Fonts/malgun.ttf",
 ]
 
+# 진짜 볼드 웨이트 폰트 파일(있으면 우선 사용). SDL_ttf 의 set_bold() 로 만드는
+# 인위적 엠볼든은 받침이 있는 일부 한글 글자(예: "닫")에서 획이 겹쳐 깨져 보인다.
+_BOLD_FONT_CANDIDATES = [
+    "C:/Windows/Fonts/malgunbd.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+    "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+]
 
-def _find_font_path():
-    for path in _FONT_CANDIDATES:
+
+def _find_font_path(candidates=_FONT_CANDIDATES):
+    for path in candidates:
         if os.path.exists(path):
             return path
     return None
@@ -25,6 +33,10 @@ def _find_font_path():
 @lru_cache(maxsize=64)
 def get_font(size, bold=False):
     """크기별 폰트를 캐시해서 돌려준다."""
+    if bold:
+        bold_path = _find_font_path(_BOLD_FONT_CANDIDATES)
+        if bold_path:
+            return pygame.font.Font(bold_path, size)
     path = _find_font_path()
     if path:
         font = pygame.font.Font(path, size)

@@ -26,6 +26,14 @@ FOUL_DEG = 45.0
 FENCE_LINE = 330.0
 FENCE_CENTER = 400.0
 
+# 파울존 내야 관중석(그랜드스탠드 부채꼴): 외야 관중석과는 붙지 않게
+# FOUL_DEG 에서 조금 띄운 각도부터 시작해, 화면 하단 회색 배경을 전부
+# 덮을 만큼 넓은 각도·반경으로 채운다.
+INFIELD_WEDGE_GAP_DEG = 3.0
+INFIELD_WEDGE_SPAN_DEG = 108.0
+INFIELD_WEDGE_R0 = 0.05 * FENCE_LINE
+INFIELD_WEDGE_R1 = 1.15 * FENCE_LINE
+
 # 수비 기본 위치(피트)
 FIELDERS_HOME = {
     "투수": (0.0, 60.5),
@@ -125,6 +133,30 @@ def _fill_stand_section(surf, rng, ang0, ang1, r0, r1, hx, hy,
         rad += step_rad
 
 
+def _fill_stand_wedge_uniform(surf, rng, ang0, ang1, r0_ft, r1_ft, step_ft=7.0):
+    """반경 차이가 큰 부채꼴(내야 파울존 관중)에서도 밀도가 균일하도록,
+    각도가 아니라 실제 거리(ft) 기준 간격으로 관중을 채운다.
+
+    _fill_stand_section 처럼 각도(step_deg) 기준으로 채우면 반경이 커질수록
+    (호의 길이 = 반지름 × 각도 이므로) 점 사이 실제 간격이 벌어져 바깥쪽은
+    듬성듬성, 안쪽은 촘촘하게 겹쳐 보인다. 여기서는 매 반경(row)마다 그
+    반경에서의 전체 호 길이를 구해 step_ft 간격에 맞는 개수만큼 점을 나눠
+    찍어서, 안쪽/바깥쪽 밀도가 동일하게 유지된다.
+    """
+    span_rad = math.radians(ang1 - ang0)
+    r = r0_ft
+    while r < r1_ft:
+        arc_len = span_rad * r
+        n = max(1, int(arc_len / step_ft))
+        for i in range(n + 1):
+            deg = ang0 + (ang1 - ang0) * i / n
+            x, y = to_screen(*polar(r, deg))
+            if 8 <= x < C.WIDTH - 8 and SB_H + 4 <= y < C.HEIGHT - 8:
+                dr = CROWD_DOT_R if r < (r0_ft + r1_ft) * 0.55 else CROWD_DOT_R_BACK
+                _draw_fan_dot(surf, x, y, rng, radius=dr)
+        r += step_ft
+
+
 def _draw_tier_ring(surf, ang0, ang1, mul, color, steps=48):
     ring = []
     for i in range(steps + 1):
@@ -134,7 +166,7 @@ def _draw_tier_ring(surf, ang0, ang1, mul, color, steps=48):
 
 
 def _crowd_surface():
-    """외야 관중석 2층만(내야 관중 없음), 배경은 하늘."""
+    """외야 관중석 2층 + 파울존 내야 관중(그랜드스탠드), 배경은 하늘."""
     global _CROWD
     if _CROWD is not None:
         return _CROWD
@@ -161,6 +193,20 @@ def _crowd_surface():
             r0 = of_tiers[i - 1] if i > 0 else 1.04
             _fill_stand_section(surf, rng, a0, a1, r0 + 0.01, mul - 0.01, hx, hy,
                                 step_deg=1.2, step_rad=0.020)
+
+    # ---- 파울존 내야 관중(그랜드스탠드 부채꼴). 필드·덕아웃보다 먼저
+    # 그려지는 배경층이라, 이후에 그려지는 잔디·덕아웃이 자연스럽게
+    # 경기장 쪽 여백을 가려주므로 별도 제외 영역 계산이 필요 없다.
+    for sign in (-1, 1):
+        lo = sign * (FOUL_DEG + INFIELD_WEDGE_GAP_DEG)
+        hi = sign * INFIELD_WEDGE_SPAN_DEG
+        lo, hi = (lo, hi) if lo < hi else (hi, lo)
+        _fill_stand_wedge_uniform(surf, rng, lo, hi,
+                                  INFIELD_WEDGE_R0, INFIELD_WEDGE_R1)
+        _draw_tier_ring(surf, lo, hi, INFIELD_WEDGE_R1 / FENCE_LINE,
+                        C.STANDS_RAIL, steps=24)
+        _draw_tier_ring(surf, lo, hi, INFIELD_WEDGE_R0 / FENCE_LINE,
+                        C.STANDS_DARK, steps=24)
 
     _CROWD = surf
     return _CROWD
@@ -244,184 +290,6 @@ def _grass_foul_outside_band(surface):
         to_screen(*polar(d_far, -FOUL_DEG)),
     ]
     pygame.draw.polygon(surface, C.GRASS, poly)
-
-
-def _point_in_poly(px, py, poly):
-    inside = False
-    j = len(poly) - 1
-    for i in range(len(poly)):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        if ((yi > py) != (yj > py)) and (
-                px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi):
-            inside = not inside
-        j = i
-    return inside
-
-
-def _foul_grass_screen_poly():
-    """파울 바깥 잔디 밴드(화면 좌표) — 하늘 관중 배치 시 제외."""
-    ox3, ox1, oy = -4.0, 4.0, -64.0
-    d_far = 142.0
-    out_w = 22.0
-    bot_y = -38.0 + oy
-
-    def outside(d, foul_deg, ox, perp=out_w):
-        ang = math.radians(foul_deg)
-        ax, ay = math.sin(ang), math.cos(ang)
-        ss = -1 if foul_deg < 0 else 1
-        px, py = math.cos(ang) * ss, -math.sin(ang) * ss
-        return to_screen(ax * d + px * perp + ox, ay * d + py * perp + oy)
-
-    return [
-        outside(d_far, -FOUL_DEG, ox3),
-        outside(0, -FOUL_DEG, ox3, 18),
-        to_screen(-62 + ox3, bot_y),
-        to_screen(0, bot_y - 12),
-        to_screen(62 + ox1, bot_y),
-        outside(0, FOUL_DEG, ox1, 18),
-        outside(d_far, FOUL_DEG, ox1),
-        to_screen(*polar(d_far, FOUL_DEG)),
-        to_screen(*HOME),
-        to_screen(*polar(d_far, -FOUL_DEG)),
-    ]
-
-
-def _dark_foul_screen_poly():
-    """페어존 바깥 파울 잔디(±58°) 화면 폴리곤."""
-    foul_deg = 58.0
-    steps = 24
-    poly = [to_screen(*HOME)]
-    for i in range(steps + 1):
-        deg = -foul_deg + (2 * foul_deg) * i / steps
-        poly.append(to_screen(*polar(fence_dist(deg), deg)))
-    return poly
-
-
-def _dugout_screen_poly(foul_deg, side_sign, offset_x=0.0, offset_y=0.0):
-    """덕아웃 화면 좌표(관중 배치 제외용)."""
-    ang = math.radians(foul_deg)
-    ax, ay = math.sin(ang), math.cos(ang)
-    px, py = math.cos(ang) * side_sign, -math.sin(ang) * side_sign
-    d0, d1, half_w = 86.0, 142.0, 20.0
-
-    def fpt(along, perp):
-        return to_screen(ax * along + px * perp + offset_x,
-                         ay * along + py * perp + offset_y)
-
-    return [fpt(a, p) for a, p in ((d0, half_w), (d1, half_w),
-                                    (d1, -half_w), (d0, -half_w))]
-
-
-def _in_dugout_zone(sx, sy, poly, pad=12):
-    xs = [p[0] for p in poly]
-    ys = [p[1] for p in poly]
-    return (min(xs) - pad <= sx <= max(xs) + pad
-            and min(ys) - pad <= sy <= max(ys) + pad)
-
-
-def _infield_block_poly():
-    """내야 흙(홈·덕아웃 앞) — 관중 침범 방지."""
-    pad, back_depth, back_half_w = 20.0, 32.0, 32.0
-    return [
-        to_screen(-back_half_w, -10),
-        to_screen(B3[0] - pad, B3[1] + 2),
-        to_screen(B2[0], B2[1] + pad),
-        to_screen(B1[0] + pad, B1[1] + 2),
-        to_screen(back_half_w, -10),
-        to_screen(0, -back_depth),
-    ]
-
-
-def _infield_crowd_ok(sx, sy, grass_poly, dark_poly, dug_polys):
-    """하늘 여백만 — 잔디·덕아웃·내야 흙 제외."""
-    if not (8 <= sx < C.WIDTH - 8 and SB_H + 20 <= sy < C.HEIGHT - 10):
-        return False
-    if (_point_in_poly(sx, sy, grass_poly) or _point_in_poly(sx, sy, dark_poly)
-            or _point_in_poly(sx, sy, _infield_block_poly())):
-        return False
-    for dug in dug_polys:
-        if _in_dugout_zone(sx, sy, dug):
-            return False
-    return True
-
-
-def _draw_infield_foul_crowd(surface):
-    """±58° 직선 바깥(하늘) 여백 — 1·3루 내야 관중."""
-    import random as _r
-
-    rng = _r.Random(20260710)
-    foul_wide = 58.0
-    grass_poly = _foul_grass_screen_poly()
-    dark_poly = _dark_foul_screen_poly()
-    dug_polys = (
-        _dugout_screen_poly(-FOUL_DEG, -1, -4.0, -64.0),
-        _dugout_screen_poly(FOUL_DEG, 1, 4.0, -64.0),
-    )
-
-    arc_l = to_screen(*polar(fence_dist(-foul_wide), -foul_wide))
-    stop_l = to_screen(*polar(108.0, -foul_wide))
-    arc_r = to_screen(*polar(fence_dist(foul_wide), foul_wide))
-    stop_r = to_screen(*polar(108.0, foul_wide))
-
-    def sky_normal(ax, ay, bx, by, sky_x, sky_y):
-        dx, dy = bx - ax, by - ay
-        ln = math.hypot(dx, dy) or 1.0
-        nx, ny = -dy / ln, dx / ln
-        mx, my = (ax + bx) * 0.5, (ay + by) * 0.5
-        if (sky_x - mx) * nx + (sky_y - my) * ny < 0:
-            nx, ny = -nx, -ny
-        return nx, ny
-
-    mid_l_y = (arc_l[1] + stop_l[1]) * 0.5
-    mid_r_y = (arc_r[1] + stop_r[1]) * 0.5
-    nl_x, nl_y = sky_normal(arc_l[0], arc_l[1], stop_l[0], stop_l[1], 6, mid_l_y)
-    nr_x, nr_y = sky_normal(arc_r[0], arc_r[1], stop_r[0], stop_r[1], C.WIDTH - 6, mid_r_y)
-
-    for off, col in ((14, C.STANDS_RAIL), (28, C.STANDS_DARK)):
-        pygame.draw.line(
-            surface, col,
-            (int(arc_l[0] + nl_x * off), int(arc_l[1] + nl_y * off)),
-            (int(stop_l[0] + nl_x * off), int(stop_l[1] + nl_y * off)), 2)
-        pygame.draw.line(
-            surface, col,
-            (int(arc_r[0] + nr_x * off), int(arc_r[1] + nr_y * off)),
-            (int(stop_r[0] + nr_x * off), int(stop_r[1] + nr_y * off)), 2)
-
-    crowd_ok = lambda sx, sy: _infield_crowd_ok(sx, sy, grass_poly, dark_poly, dug_polys)
-
-    def _fill_sky_strip(line_a, line_b, nx, ny, u_step=6.0, off_step=7.0,
-                        ext_back=70.0, ext_fwd=260.0, off_max=440.0,
-                        u_phase=0.0, off_phase=0.0):
-        """58° 밑줄과 같은 각도(선 방향×하늘 법선)로 하늘 여백 채우기."""
-        dx = line_b[0] - line_a[0]
-        dy = line_b[1] - line_a[1]
-        ln = math.hypot(dx, dy) or 1.0
-        ux, uy = dx / ln, dy / ln
-        ext_a = (line_a[0] - ux * ext_back, line_a[1] - uy * ext_back)
-        ext_b = (line_b[0] + ux * ext_fwd, line_b[1] + uy * ext_fwd)
-        total = math.hypot(ext_b[0] - ext_a[0], ext_b[1] - ext_a[1])
-        u = u_phase
-        while u <= total:
-            bx = ext_a[0] + ux * u
-            by = ext_a[1] + uy * u
-            off = 10.0 + off_phase
-            while off <= off_max:
-                sx = int(bx + nx * off)
-                sy = int(by + ny * off)
-                if crowd_ok(sx, sy):
-                    _draw_fan_dot(surface, sx, sy, rng, radius=CROWD_DOT_R)
-                off += off_step
-            u += u_step
-
-    home_l = to_screen(*polar(18.0, -foul_wide))
-    home_r = to_screen(*polar(18.0, foul_wide))
-
-    for line_a, line_b, nx, ny in (
-        (arc_l, home_l, nl_x, nl_y),
-        (arc_r, home_r, nr_x, nr_y),
-    ):
-        _fill_sky_strip(line_a, line_b, nx, ny, u_step=8.0, off_step=9.0)
 
 
 def _dugout_on_foul(surface, foul_deg, side_sign, jersey_color,
@@ -583,7 +451,6 @@ def draw_field(surface):
         _draw_base(surface, BASES_XY[key])
     _draw_home_plate(surface)
     _draw_dugouts(surface)
-    _draw_infield_foul_crowd(surface)
 
 
 def _draw_base(surface, ft):
