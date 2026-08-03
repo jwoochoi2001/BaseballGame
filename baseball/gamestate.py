@@ -39,6 +39,9 @@ class LiveGame:
         self.walk_off = False
         self.skipped_bottom_9th = False
         self.game_tied = False
+        # 경기가 끝난 순간의 이닝 표시를 그대로 고정(9회 이후로 넘어가
+        # "10회 초" 처럼 보이지 않도록)
+        self._final_half_label = None
         # 팀별 좌우타 정보
         self.right = [list(C.DEFAULT_RIGHT), list(C.DEFAULT_RIGHT)]
         # 팀별 선발투수 이름·투구 손(표시용, 실제 투구 로직에는 영향 없음)
@@ -149,6 +152,8 @@ class LiveGame:
             self.solo_game_over = True
 
     def half_label(self):
+        if self._final_half_label is not None:
+            return self._final_half_label
         return f"{self.inning}회 {'초' if self.half == 'top' else '말'}"
 
     def format_batter_stats_compact(self, team_idx, slot):
@@ -217,6 +222,7 @@ class LiveGame:
             self.line[t].append(0)
 
     def _end_half(self):
+        pre_label = self.half_label()
         self.outs = 0
         self.bases = [False, False, False]
         if self.half == "top":
@@ -225,6 +231,7 @@ class LiveGame:
                     and self.score[1] > self.score[0]):
                 self.skipped_bottom_9th = True
                 self.inning = self.innings + 1
+                self._final_half_label = pre_label
                 return
             self.half = "bottom"
             self.batting_team = 1
@@ -235,7 +242,9 @@ class LiveGame:
             self.half = "top"
             self.batting_team = 0
             self.inning += 1
-        if not self.is_over():
+        if self.is_over():
+            self._final_half_label = pre_label
+        else:
             self.pending_inning_change = True
             self._begin_half()
 
@@ -260,6 +269,7 @@ class LiveGame:
         """9회말 홈팀이 1점이라도 앞서면 끝내기(홈팀 승리). 연장 없음."""
         if (self.inning == self.innings and self.half == "bottom"
                 and self.batting_team == 1 and self.score[1] > self.score[0]):
+            self._final_half_label = self.half_label()
             self.walk_off = True
             self.inning = self.innings + 1
             return True

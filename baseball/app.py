@@ -43,7 +43,7 @@ SWING_ANIM_SEC = 0.30
 # 좌측 패널 위치(구종 선택 / S B O)
 LEFT_PANEL_X = 14
 PITCH_PANEL_Y = 112
-PITCH_PANEL_H = 166
+PITCH_PANEL_H = 190
 COUNT_PANEL_Y = PITCH_PANEL_Y + PITCH_PANEL_H + 10
 
 BASEPATH = [field.HOME, field.B1, field.B2, field.B3, field.HOME]
@@ -1379,17 +1379,10 @@ class PlayScene:
             outs = "●" * g.outs + "○" * (C.OUTS_PER_INNING - g.outs)
             draw_text(s, f"아웃 {outs}", 18, bx, by + 44, C.LIGHT_GRAY, center=True)
 
-        # 수비팀·타자 — 이닝/아웃 표시 아래(우측)
+        # 타자 — 이닝/아웃 표시 아래(우측)
         name, order = g.current_batter_name()
         hand = "우타" if g.batter_is_right() else "좌타"
         ty = by + 68
-        if not g.one_player:
-            draw_text(s, f"공격: {g.team_names[g.batting_team]}", 15, bx, ty,
-                      C.BLACK, center=True, bold=True)
-            ty += 18
-            draw_text(s, f"수비: {g.team_names[g.defending_team]}", 15, bx, ty,
-                      C.BLACK, center=True, bold=True)
-            ty += 22
         draw_text(s, f"타석: {order}번 {name} ({hand})", 17, bx, ty,
                   C.BLACK, center=True, bold=True)
         if not g.one_player:
@@ -1431,20 +1424,22 @@ class PlayScene:
         panel.fill((10, 14, 22, 215))
         s.blit(panel, (x, y))
         pygame.draw.rect(s, C.ACCENT2, (x, y, w, h), width=2, border_radius=8)
-        draw_text(s, f"{g.team_names[g.defending_team]} 수비", 18, x + 12, y + 16,
+        draw_text(s, f"공격: {g.team_names[g.batting_team]}", 16, x + 12, y + 14,
+                  C.WHITE, bold=True)
+        draw_text(s, f"수비: {g.team_names[g.defending_team]}", 16, x + 12, y + 34,
                   C.WHITE, bold=True)
         pitcher = g.pitchers[g.defending_team]
         if pitcher:
             hand = "우투" if g.pitcher_right[g.defending_team] else "좌투"
-            draw_text(s, f"선발투수: {pitcher} ({hand})", 15, x + 12, y + 38,
+            draw_text(s, f"투수: {pitcher} ({hand})", 15, x + 12, y + 58,
                       C.ACCENT2)
-        draw_text(s, "구종을 선택하세요", 16, x + 12, y + 60, C.LIGHT_GRAY)
+        draw_text(s, "구종을 선택하세요", 16, x + 12, y + 82, C.LIGHT_GRAY)
         if g.defending_team == 0:
             labels = ("[8] 패스트볼", "[9] 슬라이더", "[0] 커브")
         else:
             labels = ("[1] 패스트볼", "[2] 슬라이더", "[3] 커브")
         for i, lab in enumerate(labels):
-            draw_text(s, lab, 16, x + 12, y + 84 + i * 26, C.LIGHT_GRAY)
+            draw_text(s, lab, 16, x + 12, y + 106 + i * 26, C.LIGHT_GRAY)
 
     def _draw_count_panel(self, s):
         """S B O 카운트 현황판 (스트라이크=노랑, 볼=초록, 아웃=빨강)."""
