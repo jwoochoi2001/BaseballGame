@@ -72,9 +72,10 @@ class TextInput:
                 self.text = self.text[:-1]
             elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
                 self.active = False
-            elif event.unicode and len(self.text) < self.max_len:
-                if event.unicode.isprintable():
-                    self.text += event.unicode
+        elif event.type == pygame.TEXTINPUT and self.active:
+            # TEXTINPUT 은 한글 등 IME 로 조합된 완성 문자를 전달한다(KEYDOWN.unicode 는 조합 전 입력이라 한글 입력이 안 됨).
+            if len(self.text) < self.max_len:
+                self.text += event.text
 
     def draw(self, surface):
         border = C.ACCENT2 if self.active else C.BLACK

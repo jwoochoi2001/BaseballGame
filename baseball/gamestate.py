@@ -41,6 +41,8 @@ class LiveGame:
         self.game_tied = False
         # 팀별 좌우타 정보
         self.right = [list(C.DEFAULT_RIGHT), list(C.DEFAULT_RIGHT)]
+        # 팀별 선발투수 이름(표시용, 실제 투구 로직에는 영향 없음)
+        self.pitchers = ["", ""]
 
         if one_player:
             self.batting_team = 1

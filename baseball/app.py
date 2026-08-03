@@ -43,7 +43,7 @@ SWING_ANIM_SEC = 0.30
 # 좌측 패널 위치(구종 선택 / S B O)
 LEFT_PANEL_X = 14
 PITCH_PANEL_Y = 112
-PITCH_PANEL_H = 142
+PITCH_PANEL_H = 166
 COUNT_PANEL_Y = PITCH_PANEL_Y + PITCH_PANEL_H + 10
 
 BASEPATH = [field.HOME, field.B1, field.B2, field.B3, field.HOME]
@@ -347,6 +347,13 @@ class MenuScene:
 
 
 # ============================================================ 라인업 설정
+LINEUP_ROW_H = 42
+LINEUP_COL_W = 452
+LINEUP_COL_X = (22, C.WIDTH - 22 - LINEUP_COL_W)
+TEAM_LABELS = ("원정팀", "홈팀")
+TEAM_LABEL_COLORS = (C.TEAM_AWAY, C.TEAM_HOME)
+
+
 class LineupScene:
     def __init__(self, app, one_player):
         self.app = app
@@ -354,6 +361,7 @@ class LineupScene:
         self.inputs = []
         self.team_inputs = []
         self.hand_btns = []
+        self.pitcher_inputs = []
         if one_player:
             # 1인: 타자 한 명만 설정
             self.names = [C.DEFAULT_1P_BATTER]
@@ -364,72 +372,101 @@ class LineupScene:
             self.hand_btns.append(Button((cx - 80, 410, 160, 52),
                                          "우타" if self.right[0] else "좌타",
                                          size=26))
-        else:
-            # 2인: 팀 이름(1·3번 행 우측) + 1~9번 라인업
-            self.names = list(C.DEFAULT_LINEUP)
-            self.right = list(C.DEFAULT_RIGHT)
-            self.lineup_top = 200
-            team_x, team_w, team_h = 688, 220, 42
-            self.team_inputs.append(
-                TextInput((team_x, self.lineup_top, team_w, team_h),
-                          text=C.DEFAULT_TEAM_AWAY, max_len=8))
-            self.team_inputs.append(
-                TextInput((team_x, self.lineup_top + 104, team_w, team_h),
-                          text=C.DEFAULT_TEAM_HOME, max_len=8))
-            for i in range(9):
-                row_y = self.lineup_top + i * 52
-                self.inputs.append(TextInput((300, row_y, 240, 42),
-                                             text=self.names[i], max_len=8))
-                self.hand_btns.append(Button((560, row_y, 110, 42),
-                                             "우타" if self.right[i] else "좌타",
-                                             size=22))
-            team_btn_y = self.lineup_top + 104 + team_h + 18
-            self.btn_start = Button((team_x, team_btn_y, team_w, 58),
-                                    "경기 시작", size=28, color=C.ACCENT,
-                                    hover=C.GOOD)
-            last_row_bottom = self.lineup_top + 8 * 52 + 42
-            self.btn_back = Button((40, last_row_bottom + 12, 140, 54), "뒤로",
-                                   size=24, color=C.PANEL, hover=C.GRAY)
-        if one_player:
             self.btn_start = Button((C.WIDTH // 2 - 110, 640, 220, 60),
                                     "경기 시작", size=30, color=C.ACCENT,
                                     hover=C.GOOD)
             self.btn_back = Button((40, 640, 140, 54), "뒤로", size=24,
                                    color=C.PANEL, hover=C.GRAY)
+        else:
+            # 2인: 원정팀·홈팀 각각 팀 이름 + 1~9번 라인업 + 선발투수
+            self.names = [list(C.DEFAULT_LINEUP), list(C.DEFAULT_LINEUP)]
+            self.right = [list(C.DEFAULT_RIGHT), list(C.DEFAULT_RIGHT)]
+            self.inputs = [[], []]
+            self.hand_btns = [[], []]
+            self.lineup_top = 168
+            team_defaults = (C.DEFAULT_TEAM_AWAY, C.DEFAULT_TEAM_HOME)
+            for t in range(2):
+                cx0 = LINEUP_COL_X[t]
+                self.team_inputs.append(
+                    TextInput((cx0 + 118, self.lineup_top - 54, 200, 40),
+                              text=team_defaults[t], max_len=8))
+                for i in range(9):
+                    row_y = self.lineup_top + i * LINEUP_ROW_H
+                    self.inputs[t].append(
+                        TextInput((cx0 + 50, row_y, 178, 34),
+                                 text=self.names[t][i], max_len=8))
+                    self.hand_btns[t].append(
+                        Button((cx0 + 238, row_y, 84, 34),
+                              "우타" if self.right[t][i] else "좌타", size=17))
+                pitcher_y = self.lineup_top + 9 * LINEUP_ROW_H + 8
+                self.pitcher_inputs.append(
+                    TextInput((cx0 + 50, pitcher_y, 178, 34), text="", max_len=8))
+            btn_y = self.lineup_top + 10 * LINEUP_ROW_H + 32
+            self.btn_start = Button((C.WIDTH // 2 - 110, btn_y, 220, 56),
+                                    "경기 시작", size=26, color=C.ACCENT,
+                                    hover=C.GOOD)
+            self.btn_back = Button((40, btn_y + 2, 140, 52), "뒤로",
+                                   size=22, color=C.PANEL, hover=C.GRAY)
+
+    def _all_text_inputs(self):
+        if self.one_player:
+            return list(self.inputs)
+        return (list(self.team_inputs) + self.inputs[0] + self.inputs[1]
+                + self.pitcher_inputs)
+
+    def _all_hand_buttons(self):
+        if self.one_player:
+            return list(self.hand_btns)
+        return self.hand_btns[0] + self.hand_btns[1]
 
     def handle(self, events):
         mouse = pygame.mouse.get_pos()
-        for b in self.hand_btns + [self.btn_start, self.btn_back]:
+        for b in self._all_hand_buttons() + [self.btn_start, self.btn_back]:
             b.update(mouse)
         for e in events:
-            for inp in self.team_inputs + self.inputs:
+            for inp in self._all_text_inputs():
                 inp.handle(e)
-            for i, b in enumerate(self.hand_btns):
-                if b.clicked(e):
-                    self.right[i] = not self.right[i]
-                    b.text = "우타" if self.right[i] else "좌타"
+            if self.one_player:
+                for i, b in enumerate(self.hand_btns):
+                    if b.clicked(e):
+                        self.right[i] = not self.right[i]
+                        b.text = "우타" if self.right[i] else "좌타"
+            else:
+                for t in range(2):
+                    for i, b in enumerate(self.hand_btns[t]):
+                        if b.clicked(e):
+                            self.right[t][i] = not self.right[t][i]
+                            b.text = "우타" if self.right[t][i] else "좌타"
             if self.btn_back.clicked(e):
                 self.app.change_scene(MenuScene(self.app))
             elif self.btn_start.clicked(e):
                 self._start()
 
     def _start(self):
-        names = [inp.text.strip() or (C.DEFAULT_1P_BATTER if self.one_player
-                                     else C.DEFAULT_LINEUP[i])
-                 for i, inp in enumerate(self.inputs)]
         if self.one_player:
-            lineups = [list(C.DEFAULT_LINEUP), names]
+            name = self.inputs[0].text.strip() or C.DEFAULT_1P_BATTER
+            lineups = [list(C.DEFAULT_LINEUP), [name]]
             team_names = ["상대팀", "우리팀"]
             rights = [list(C.DEFAULT_RIGHT), list(self.right)]
+            pitchers = ["", ""]
         else:
-            lineups = [names, list(names)]
+            lineups = [
+                [inp.text.strip() or C.DEFAULT_LINEUP[i]
+                 for i, inp in enumerate(self.inputs[t])]
+                for t in range(2)
+            ]
             team_names = [
                 self.team_inputs[0].text.strip() or C.DEFAULT_TEAM_AWAY,
                 self.team_inputs[1].text.strip() or C.DEFAULT_TEAM_HOME,
             ]
-            rights = [list(self.right), list(self.right)]
+            rights = [list(self.right[0]), list(self.right[1])]
+            pitchers = [
+                self.pitcher_inputs[0].text.strip() or "선발투수",
+                self.pitcher_inputs[1].text.strip() or "선발투수",
+            ]
         game = LiveGame(self.one_player, lineups, team_names)
         game.right = rights
+        game.pitchers = pitchers
         self.app.change_scene(PlayScene(self.app, game))
 
     def update(self, dt):
@@ -447,25 +484,30 @@ class LineupScene:
             self.inputs[0].draw(s)
             self.hand_btns[0].draw(s)
         else:
-            draw_text(s, "2인 게임 - 라인업 설정", 40, C.WIDTH // 2, 52,
+            draw_text(s, "2인 게임 - 라인업 설정", 32, C.WIDTH // 2, 40,
                       C.WHITE, center=True, bold=True)
-            draw_text(s, "타순", 22, 210, self.lineup_top - 30, C.LIGHT_GRAY, center=True)
-            draw_text(s, "선수 이름 (클릭해서 수정)", 22, 420, self.lineup_top - 30,
-                      C.LIGHT_GRAY, center=True)
-            draw_text(s, "타격", 22, 615, self.lineup_top - 30, C.LIGHT_GRAY, center=True)
-            draw_text(s, "팀 이름", 22, 798, self.lineup_top - 30, C.LIGHT_GRAY, center=True)
-            draw_text(s, "원정·파랑", 16, 798, self.lineup_top - 10,
-                      C.TEAM_AWAY, center=True, bold=True)
-            draw_text(s, "홈·빨강", 16, 798, self.lineup_top + 94,
-                      C.TEAM_HOME, center=True, bold=True)
-            for inp in self.team_inputs:
-                inp.draw(s)
-            for i in range(9):
-                row_y = self.lineup_top + i * 52
-                draw_text(s, f"{i + 1}번", 26, 210, row_y + 21, C.ACCENT2,
+            draw_text(s, "이름을 클릭해서 수정하세요 (한글 가능)", 16,
+                      C.WIDTH // 2, 70, C.LIGHT_GRAY, center=True)
+            for t in range(2):
+                cx0 = LINEUP_COL_X[t]
+                draw_text(s, f"{TEAM_LABELS[t]} 이름", 15, cx0 + 218,
+                          self.lineup_top - 74, TEAM_LABEL_COLORS[t],
                           center=True, bold=True)
-                self.inputs[i].draw(s)
-                self.hand_btns[i].draw(s)
+                self.team_inputs[t].draw(s)
+                hdr_y = self.lineup_top - 10
+                draw_text(s, "타순", 14, cx0 + 25, hdr_y, C.LIGHT_GRAY, center=True)
+                draw_text(s, "이름", 14, cx0 + 139, hdr_y, C.LIGHT_GRAY, center=True)
+                draw_text(s, "타격", 14, cx0 + 280, hdr_y, C.LIGHT_GRAY, center=True)
+                for i in range(9):
+                    row_y = self.lineup_top + i * LINEUP_ROW_H
+                    draw_text(s, f"{i + 1}번", 18, cx0 + 25, row_y + 17,
+                              C.ACCENT2, center=True, bold=True)
+                    self.inputs[t][i].draw(s)
+                    self.hand_btns[t][i].draw(s)
+                pitcher_y = self.lineup_top + 9 * LINEUP_ROW_H + 8
+                draw_text(s, "투수", 18, cx0 + 25, pitcher_y + 17,
+                          C.GOOD, center=True, bold=True)
+                self.pitcher_inputs[t].draw(s)
         self.btn_start.draw(s)
         self.btn_back.draw(s)
 
@@ -1326,7 +1368,10 @@ class PlayScene:
         hand = "우타" if g.batter_is_right() else "좌타"
         ty = by + 68
         if not g.one_player:
-            draw_text(s, f"수비: {g.team_names[g.defending_team]}", 16, bx, ty,
+            draw_text(s, f"공격: {g.team_names[g.batting_team]}", 15, bx, ty,
+                      C.BLACK, center=True, bold=True)
+            ty += 18
+            draw_text(s, f"수비: {g.team_names[g.defending_team]}", 15, bx, ty,
                       C.BLACK, center=True, bold=True)
             ty += 22
         draw_text(s, f"타석: {order}번 {name} ({hand})", 17, bx, ty,
@@ -1372,13 +1417,16 @@ class PlayScene:
         pygame.draw.rect(s, C.ACCENT2, (x, y, w, h), width=2, border_radius=8)
         draw_text(s, f"{g.team_names[g.defending_team]} 수비", 18, x + 12, y + 16,
                   C.WHITE, bold=True)
-        draw_text(s, "구종을 선택하세요", 16, x + 12, y + 38, C.LIGHT_GRAY)
+        pitcher = g.pitchers[g.defending_team]
+        if pitcher:
+            draw_text(s, f"선발투수: {pitcher}", 15, x + 12, y + 38, C.ACCENT2)
+        draw_text(s, "구종을 선택하세요", 16, x + 12, y + 60, C.LIGHT_GRAY)
         if g.defending_team == 0:
             labels = ("[8] 패스트볼", "[9] 슬라이더", "[0] 커브")
         else:
             labels = ("[1] 패스트볼", "[2] 슬라이더", "[3] 커브")
         for i, lab in enumerate(labels):
-            draw_text(s, lab, 16, x + 12, y + 62 + i * 26, C.LIGHT_GRAY)
+            draw_text(s, lab, 16, x + 12, y + 84 + i * 26, C.LIGHT_GRAY)
 
     def _draw_count_panel(self, s):
         """S B O 카운트 현황판 (스트라이크=노랑, 볼=초록, 아웃=빨강)."""
@@ -1517,21 +1565,43 @@ class GameOverScene:
                                 again_label, size=28, color=C.ACCENT, hover=C.GOOD)
         self.btn_menu = Button((C.WIDTH // 2 + 20, 560, 210, 60),
                                quit_label, size=28)
+        self.show_stats = False
+        self.btn_stats = None
+        if not game.one_player:
+            self.btn_stats = Button((C.WIDTH // 2 - 105, 636, 210, 46),
+                                    "기록", size=22, color=C.PANEL,
+                                    hover=C.PANEL_LIGHT)
+        self.btn_stats_close = Button((C.WIDTH // 2 - 90, C.HEIGHT - 58, 180, 44),
+                                      "닫기", size=22, color=C.PANEL, hover=C.GRAY)
 
     def handle(self, events):
         mouse = pygame.mouse.get_pos()
-        for b in (self.btn_again, self.btn_menu):
+        if self.show_stats:
+            self.btn_stats_close.update(mouse)
+            for e in events:
+                if self.btn_stats_close.clicked(e):
+                    self.show_stats = False
+            return
+        buttons = [self.btn_again, self.btn_menu]
+        if self.btn_stats:
+            buttons.append(self.btn_stats)
+        for b in buttons:
             b.update(mouse)
         for e in events:
             if self.btn_again.clicked(e):
                 self.app.change_scene(LineupScene(self.app, self.game.one_player))
             elif self.btn_menu.clicked(e):
                 self.app.change_scene(MenuScene(self.app))
+            elif self.btn_stats and self.btn_stats.clicked(e):
+                self.show_stats = True
 
     def update(self, dt):
         pass
 
     def draw(self, s):
+        if self.show_stats:
+            self._draw_boxscore(s)
+            return
         s.fill(C.DARK_PANEL)
         g = self.game
         if g.one_player:
@@ -1606,6 +1676,56 @@ class GameOverScene:
                               C.WHITE, center=True, bold=True)
         for b in (self.btn_again, self.btn_menu):
             b.draw(s)
+        if self.btn_stats:
+            self.btn_stats.draw(s)
+
+    def _draw_boxscore(self, s):
+        """양팀 타자 기록표(타수·안타·타점·홈런·타율)."""
+        g = self.game
+        s.fill(C.DARK_PANEL)
+        draw_text(s, "타자 기록", 40, C.WIDTH // 2, 44, C.WHITE,
+                  center=True, bold=True)
+
+        col_w = (44, 96, 46, 46, 46, 46, 62)
+        headers = ("타순", "이름", "타수", "안타", "타점", "홈런", "타율")
+        table_w = sum(col_w)
+        gap = 36
+        total_w = table_w * 2 + gap
+        start_x = (C.WIDTH - total_w) // 2
+        top_y = 92
+        row_h = 27
+
+        for ti in range(2):
+            tx = start_x + ti * (table_w + gap)
+            attacking_col = C.ACCENT2 if ti == g.batting_team else C.WHITE
+            draw_text(s, g.team_names[ti], 22, tx + table_w // 2, top_y,
+                      attacking_col, center=True, bold=True)
+            hy = top_y + 32
+            cx = tx
+            for w, h in zip(col_w, headers):
+                draw_text(s, h, 15, cx + w // 2, hy, C.LIGHT_GRAY,
+                          center=True, bold=True)
+                cx += w
+            pygame.draw.line(s, C.GRAY, (tx, hy + 13), (tx + table_w, hy + 13), 1)
+
+            for slot in range(9):
+                ry = hy + 22 + slot * row_h
+                st = g.batter_stats[ti][slot]
+                name = g.lineups[ti][slot % len(g.lineups[ti])]
+                if st["ab"] > 0:
+                    avg = st["h"] / st["ab"]
+                    avg_str = f"{avg:.3f}".lstrip("0") if avg < 1 else f"{avg:.3f}"
+                else:
+                    avg_str = "-"
+                vals = (f"{slot + 1}", name, st["ab"], st["h"], st["rbi"],
+                        st["hr"], avg_str)
+                cx = tx
+                for w, val in zip(col_w, vals):
+                    draw_text(s, str(val), 15, cx + w // 2, ry, C.WHITE,
+                              center=True)
+                    cx += w
+
+        self.btn_stats_close.draw(s)
 
     def _draw_final_line(self, s, top):
         g = self.game
