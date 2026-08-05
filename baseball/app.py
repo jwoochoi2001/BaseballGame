@@ -39,6 +39,11 @@ GAUGE_ZONES = [
     (0.852, 1.000, 0.28, 0.44, C.ACCENT2,         None),    # 노랑: 늦은 스윙
 ]
 SWING_ANIM_SEC = 0.30
+# 주자가 목표 루까지 뛰는 데 걸리는 총 시간(세그먼트 수 = 지나가는 베이스 칸 수).
+# 세그먼트 수에 그냥 비례(1x,2x,3x,4x)시키면 3루타·홈런이 질질 끄는 느낌이라
+# 루타별로 따로 정한다(1루타 1.8초 기준, 뒤로 갈수록 세그먼트당 증가폭은 줄어듦).
+RUNNER_SEGMENT_TIME = {1: 1.8, 2: 2.8, 3: 3.6, 4: 4.3}
+RUNNER_STEP_SEC = 1.8   # 위 표에 없는 경우(이론상 없음)의 기본 세그먼트당 시간
 
 # 좌측 패널 위치(구종 선택 / S B O)
 LEFT_PANEL_X = 14
@@ -584,6 +589,12 @@ def _runner_pos(start_idx, end_idx, p):
     return _lerp(BASEPATH[i0], BASEPATH[i1], fp - i0)
 
 
+def _runner_duration(segments):
+    """주자가 segments 칸을 뛰는 데 걸리는 총 시간(루타별 표, 없으면 비례)."""
+    segments = max(1, segments)
+    return RUNNER_SEGMENT_TIME.get(segments, RUNNER_STEP_SEC * segments)
+
+
 class PlayScene:
     def __init__(self, app, game: LiveGame):
         self.app = app
@@ -811,7 +822,9 @@ class PlayScene:
             self._dp_throw = False
             self._has_throw = False
         else:
-            self.t_flight = {"ground": 1.0, "fly": 1.35}.get(bt, 1.35)
+            # 내야 직선타(liner)는 정면으로 총알같이 꽂히는 타구라 더 빨리 도달하지만,
+            # 주자 뜀박질 속도까지 같이 빨라지진 않는다(아래 러너 페이스는 별도 고정).
+            self.t_flight = {"ground": 1.0, "fly": 1.35, "liner": 0.6}.get(bt, 1.35)
             if bt == "fly" and plan["kind"] == "hr":
                 self.t_flight = 1.7
             throw = plan.get("throw_to") is not None and plan["kind"] in ("out", "hit", "error")
@@ -826,8 +839,17 @@ class PlayScene:
             else:
                 self.anim_total = self.t_flight + (0.7 if self._has_throw else 0.4)
 
-        # 주자 트랙 구성
+        # 주자 트랙 구성.
+        # - 송구(1루 송구/포스아웃/병살)가 있는 플레이는 주자가 "송구와 경합"하는
+        #   장면이라 기존처럼 anim_total 에 맞춰(=송구 도착과 싱크) 뛰어야 한다.
+        # - 캐치로 끝나는 아웃(뜬공·직선타·태그업)이나 안타는 경합 상대가 없으니
+        #   타구 속도와 무관하게 루타별 고정 페이스로 뛴다.
+        self._runner_free_pace = not (self._has_throw or self._dp_throw)
         self.runner_tracks = self._build_tracks(plan)
+        if self.runner_tracks and self._runner_free_pace:
+            needed = max(t0 + _runner_duration(abs(end - start))
+                        for start, end, out, col, t0 in self.runner_tracks)
+            self.anim_total = max(self.anim_total, needed + 0.15)
 
     def _build_tracks(self, plan):
         # 트랙: (시작루, 도착루, 아웃여부, 색, 출발시점 t0)
@@ -854,9 +876,9 @@ class PlayScene:
             elif plan.get("tag_up"):
                 # 깊은 뜬공 아웃: 잡은 뒤(후반) 2·3루 주자 태그업 진루
                 if b[2]:
-                    tracks.append((3, 4, False, off, 0.6))   # 3루→홈
+                    tracks.append((3, 4, False, off, self.t_flight))   # 3루→홈
                 if b[1]:
-                    tracks.append((2, 3, False, off, 0.6))   # 2루→3루
+                    tracks.append((2, 3, False, off, self.t_flight))   # 2루→3루
                 if b[0]:
                     tracks.append((1, 1, False, off, 0.0))   # 1루 정지
             elif plan.get("force_out_2nd"):
@@ -1214,12 +1236,24 @@ class PlayScene:
             field.draw_fielder(s, pos, jersey_color, glove_side=gside)
 
     def _draw_runners(self, s):
-        p = min(1.0, self.anim_t / max(0.3, self.anim_total - 0.15))
-        for start, end, out, col, t0 in self.runner_tracks:
-            pp = 0.0 if p <= t0 else (p - t0) / max(1e-3, 1.0 - t0)
-            pos = _runner_pos(start, end, pp)
-            c = C.GRAY if (out and p > 0.85) else col
-            field.draw_runner(s, pos, c)
+        if self._runner_free_pace:
+            # 경합 상대(송구)가 없는 플레이: 루타별 고정 페이스로 달린다 —
+            # 타구(공)가 빨리 잡히더라도 사람이 뛰는 속도는 항상 동일하다.
+            for start, end, out, col, t0 in self.runner_tracks:
+                dur = _runner_duration(abs(end - start))
+                pp = 0.0 if self.anim_t <= t0 else min(1.0, (self.anim_t - t0) / dur)
+                pos = _runner_pos(start, end, pp)
+                c = C.GRAY if (out and pp > 0.85) else col
+                field.draw_runner(s, pos, c)
+        else:
+            # 송구가 있는 플레이: 주자가 송구 도착 시점과 맞물려야 하므로
+            # 이 플레이의 anim_total 에 맞춰 뛴다(=송구와 경합하는 느낌).
+            p = min(1.0, self.anim_t / max(0.3, self.anim_total - 0.15))
+            for start, end, out, col, t0 in self.runner_tracks:
+                pp = 0.0 if p <= t0 else (p - t0) / max(1e-3, 1.0 - t0)
+                pos = _runner_pos(start, end, pp)
+                c = C.GRAY if (out and p > 0.85) else col
+                field.draw_runner(s, pos, c)
 
     def _draw_pitch_ball(self, s):
         t = 0.0 if self.phase == P_READY else min(self.t, 1.0)
@@ -1696,14 +1730,14 @@ class GameOverScene:
             self.btn_stats.draw(s)
 
     def _draw_boxscore(self, s):
-        """양팀 타자 기록표(타수·안타·타점·홈런·타율)."""
+        """양팀 타자 기록표(타수·안타·타점·홈런·볼넷·타율)."""
         g = self.game
         s.fill(C.DARK_PANEL)
         draw_text(s, "타자 기록", 40, C.WIDTH // 2, 44, C.WHITE,
                   center=True, bold=True)
 
-        col_w = (44, 96, 46, 46, 46, 46, 62)
-        headers = ("타순", "이름", "타수", "안타", "타점", "홈런", "타율")
+        col_w = (44, 92, 42, 42, 42, 42, 42, 60)
+        headers = ("타순", "이름", "타수", "안타", "타점", "홈런", "볼넷", "타율")
         table_w = sum(col_w)
         gap = 36
         total_w = table_w * 2 + gap
@@ -1734,7 +1768,7 @@ class GameOverScene:
                 else:
                     avg_str = "-"
                 vals = (f"{slot + 1}", name, st["ab"], st["h"], st["rbi"],
-                        st["hr"], avg_str)
+                        st["hr"], st["bb"], avg_str)
                 cx = tx
                 for w, val in zip(col_w, vals):
                     draw_text(s, str(val), 15, cx + w // 2, ry, C.WHITE,

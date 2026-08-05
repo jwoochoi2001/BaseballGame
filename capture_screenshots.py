@@ -104,7 +104,7 @@ def capture_all():
     g.bases = [True, True, True]
     g.score = [3, 4]
     _fill_lines(g, [1, 0, 1, 0, 0, 1, 0, 0, 0], [0, 1, 0, 2, 0, 1, 0, 0, 0])
-    g.batter_stats[1][3] = {"ab": 2, "h": 1, "hr": 0, "rbi": 2}
+    g.batter_stats[1][3] = {"ab": 2, "h": 1, "hr": 0, "rbi": 2, "bb": 1}
     s = _play_scene(g)
     s.phase = P_PITCH
     s.strikes = 1
@@ -189,7 +189,7 @@ def capture_all():
     g.errors = [0, 1]
     g.walks = [3, 2]
     _fill_lines(g, [2, 1, 0, 1, 1, 1, 0, 0, 0], [1, 0, 1, 0, 0, 1, 0, 0, 0])
-    g.batter_stats[0][1] = {"ab": 4, "h": 3, "hr": 1, "rbi": 4}
+    g.batter_stats[0][1] = {"ab": 4, "h": 3, "hr": 1, "rbi": 4, "bb": 1}
     over_scene = GameOverScene(app, g)
     _save(over_scene, "17_gameover_win_away.png")
 
@@ -204,7 +204,7 @@ def capture_all():
     g.errors = [2, 0]
     g.walks = [1, 4]
     _fill_lines(g, [1, 0, 0, 1, 0, 0, 0, 0, 0], [0, 2, 1, 0, 1, 1, 0, 0, 0])
-    g.batter_stats[1][4] = {"ab": 4, "h": 3, "hr": 0, "rbi": 3}
+    g.batter_stats[1][4] = {"ab": 4, "h": 3, "hr": 0, "rbi": 3, "bb": 1}
     _save(GameOverScene(app, g), "18_gameover_win_home.png")
 
     # 2인 — 끝내기 승리
@@ -216,7 +216,7 @@ def capture_all():
     g.hits = [7, 8]
     g.walks = [2, 3]
     _fill_lines(g, [1, 0, 1, 0, 1, 0, 1, 0, 0], [0, 1, 0, 1, 0, 1, 0, 0, 1])
-    g.batter_stats[1][2] = {"ab": 3, "h": 2, "hr": 0, "rbi": 2}
+    g.batter_stats[1][2] = {"ab": 3, "h": 2, "hr": 0, "rbi": 2, "bb": 2}
     _save(GameOverScene(app, g), "19_gameover_walkoff.png")
 
     # 2인 — 무승부

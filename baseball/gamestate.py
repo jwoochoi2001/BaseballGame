@@ -60,7 +60,7 @@ class LiveGame:
             self.solo_round_clear_pending = False
         else:
             self.batter_stats = [
-                [{"ab": 0, "h": 0, "hr": 0, "rbi": 0} for _ in range(9)]
+                [{"ab": 0, "h": 0, "hr": 0, "rbi": 0, "bb": 0} for _ in range(9)]
                 for _ in range(2)
             ]
 
@@ -157,9 +157,10 @@ class LiveGame:
         return f"{self.inning}회 {'초' if self.half == 'top' else '말'}"
 
     def format_batter_stats_compact(self, team_idx, slot):
-        """타수·안타·타점·홈런 (볼넷은 타수 미포함)."""
+        """타수·안타·타점·홈런·볼넷 (볼넷은 타수 미포함)."""
         st = self.batter_stats[team_idx][slot]
-        return (f"{st['ab']}타수 {st['h']}안타 {st['rbi']}타점 {st['hr']}홈런")
+        return (f"{st['ab']}타수 {st['h']}안타 {st['rbi']}타점 "
+                f"{st['hr']}홈런 {st['bb']}볼넷")
 
     def format_batter_stat(self, team_idx, slot, name=None):
         """팀·타순별 타격 기록 문자열 (MVP 등)."""
@@ -207,6 +208,7 @@ class LiveGame:
         slot = self.batter_idx[t] % len(self.lineups[t])
         st = self.batter_stats[t][slot]
         if walk:
+            st["bb"] += 1
             return
         st["ab"] += 1
         if hit:
@@ -592,7 +594,7 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
         roll_pt = F.polar(min(roll + 40, fence - 10), spray_deg)
         if F.is_foul_point(roll_pt):
             return _foul_plan(roll_pt)
-        bases_n = 2 if power > 0.72 and abs(spray_deg) > 22 else 1
+        bases_n = 2 if power > 0.58 and abs(spray_deg) > 15 else 1
         return dict(kind="hit", label="안타!" if bases_n == 1 else "2루타!",
                     ball_type="ground", landing=roll_pt,
                     field_by=_outfielder_for(spray_deg), throw_to=None,
@@ -617,7 +619,7 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
         radius = 12
     else:  # 뜬공
         lb = max(0.4, 1 - ((launch_deg - 32) / 30.0) ** 2)
-        carry = (150 + power * 300) * lb
+        carry = (160 + power * 315) * lb
         hang = 1.3 + (launch_deg / 45.0) * 2.0 + power * 0.5
         radius = 10
 
@@ -668,9 +670,9 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
                     tag_up=can_tag, error=False)
 
     # 안타(뜬공/라인성): 거리로 루타
-    if carry >= fence * 0.94 and random.random() < 0.32:
+    if carry >= fence * 0.84 and random.random() < 0.42:
         bases_n, label = 3, "3루타!"
-    elif carry >= fence * 0.80:
+    elif carry >= fence * 0.68:
         bases_n, label = 2, "2루타!"
     else:
         bases_n, label = 1, "안타!"
