@@ -613,12 +613,14 @@ class PlayScene:
 
         # 타구 애니메이션 상태
         self.anim_t = 0.0
-        self.anim_total = 1.0
+        self.anim_total = 0.0
+        self.ball_resolve_t = 0.0
         self.t_flight = 1.0
         self.ball_pos = field.HOME
         self.ball_h = 0.0
         self.fielder_positions = dict(field.FIELDERS_HOME)
         self.runner_tracks = []   # (start_idx, end_idx, out, color)
+        self._runner_free_pace = False
 
         self.result_text = ""
         self.result_color = C.WHITE
@@ -689,6 +691,11 @@ class PlayScene:
         self.plan = None
         self.cpu_target = None
         self.fielder_positions = dict(field.FIELDERS_HOME)
+        # 이전 타구(파울 등)의 애니메이션 상태가 다음 투구(삼진·볼넷)로
+        # 새어 들어가 러너를 잘못 그리지 않도록 초기화.
+        self.anim_t = 0.0
+        self.anim_total = 0.0
+        self._runner_free_pace = False
         if self.game.is_over():
             self.app.change_scene(GameOverScene(self.app, self.game))
             return
@@ -851,6 +858,23 @@ class PlayScene:
                         for start, end, out, col, t0 in self.runner_tracks)
             self.anim_total = max(self.anim_total, needed + 0.15)
 
+        # 판정(안타/아웃/홈런 등)이 확정되는 시점.
+        # - 홈런·1루타·실책은 공이 담장을 넘거나 떨어지는 순간 이미 결과가
+        #   정해지므로 t_flight 에 바로 멘트를 띄운다.
+        # - 2루타·3루타는 타자주자가 실제로 그 베이스를 밟는 순간에 멘트를 띄운다.
+        # - 캐치로 끝나는 아웃(뜬공·직선타·태그업)도 잡히는 순간 바로 멘트.
+        # - 송구로 승부가 갈리는 아웃(포스아웃·병살 등)만 송구 도착까지 기다린다.
+        # 어느 경우든 주자는 배너가 뜬 뒤에도 화면에서 계속 제 속도로 달린다.
+        if plan["kind"] == "hit" and plan.get("bases", 1) in (2, 3):
+            self.ball_resolve_t = _runner_duration(plan["bases"])
+        elif plan["kind"] in ("hit", "hr") or (
+                plan["kind"] != "foul" and self._runner_free_pace):
+            # 실책(error)은 송구까지 포함된 플레이라 여기서 제외 — 송구가
+            # 끝나야(anim_total) 비로소 "실책 출루"가 확정되는 그림이 자연스럽다.
+            self.ball_resolve_t = self.t_flight
+        else:
+            self.ball_resolve_t = self.anim_total
+
     def _build_tracks(self, plan):
         # 트랙: (시작루, 도착루, 아웃여부, 색, 출발시점 t0)
         tracks = []
@@ -912,11 +936,16 @@ class PlayScene:
             self._register_strike("foul")
             return
         self.game.apply_plan(self.plan)
+        # 판정을 주자가 다 뛰기 전에 미리 낸 경우(자유 페이스), 배너가 주자보다
+        # 먼저 사라지지 않도록 남은 주루 시간만큼 배너 표시 시간을 늘려둔다.
+        runner_remaining = max(0.0, self.anim_total - self.anim_t)
         if self.game.is_over() and self.game.skipped_bottom_9th:
             self._show_result("경기 종료", C.ACCENT2, long_display=True)
+            self.timer = max(self.timer, runner_remaining + 0.3)
             return
         if self.game.is_over() and self.game.game_tied:
             self._show_result("경기 종료\n무승부", C.ACCENT2, long_display=True)
+            self.timer = max(self.timer, runner_remaining + 0.3)
             return
         text, col = self._play_result_message(self.plan)
         wo = self.game.walk_off
@@ -925,6 +954,7 @@ class PlayScene:
         long_display = wo or self.plan["kind"] == "hr" or (
             scored and self.plan["kind"] == "out")
         self._show_result(text, col, long_display=long_display)
+        self.timer = max(self.timer, runner_remaining + 0.3)
 
     def _play_result_message(self, plan):
         if self.game.one_player:
@@ -1054,9 +1084,14 @@ class PlayScene:
         elif self.phase == P_BATTED:
             self.anim_t += dt
             self._update_batted()
-            if self.anim_t >= self.anim_total:
+            if self.anim_t >= self.ball_resolve_t:
                 self._finish_batted()
         elif self.phase == P_RESULT:
+            # 판정은 이미 나왔지만(배너 표시 중) 주자가 아직 베이스를 다 안
+            # 돌았으면, 배너를 띄운 채로 공/주자 애니메이션을 계속 진행한다.
+            if self.anim_t < self.anim_total:
+                self.anim_t += dt
+                self._update_batted()
             self.timer -= dt
             if self.timer <= 0:
                 if self.game.is_over():
@@ -1200,7 +1235,8 @@ class PlayScene:
         field.draw_batter(s, right_handed=self.game.batter_is_right(),
                           swing=self.swing_progress or 0.0, jersey_color=off_col)
 
-        if self.phase == P_BATTED:
+        if self.phase == P_BATTED or (
+                self.phase == P_RESULT and self.anim_t < self.anim_total):
             self._draw_runners(s)
             field.draw_ball(s, self.ball_pos, self.ball_h)
         elif self.phase in (P_READY, P_PITCH):
@@ -1747,9 +1783,8 @@ class GameOverScene:
 
         for ti in range(2):
             tx = start_x + ti * (table_w + gap)
-            attacking_col = C.ACCENT2 if ti == g.batting_team else C.WHITE
             draw_text(s, g.team_names[ti], 22, tx + table_w // 2, top_y,
-                      attacking_col, center=True, bold=True)
+                      C.WHITE, center=True, bold=True)
             hy = top_y + 32
             cx = tx
             for w, h in zip(col_w, headers):

@@ -3,7 +3,7 @@
 WIDTH, HEIGHT = 960, 720
 FPS = 60
 TITLE = "히팅카운트"
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 DEVELOPER = "최정우"
 DEVELOPER_EMAIL = "jwoochoi2001@naver.com"
 
