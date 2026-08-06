@@ -1152,7 +1152,11 @@ class PlayScene:
             if plan["kind"] == "out":
                 fp = min(1.0, p * 1.05)
             else:
-                fp = min(1.0, self.anim_t / max(0.3, self.anim_total))
+                # 안타(특히 2·3루타)는 주자를 다 뛰게 하려고 anim_total 이
+                # 길게 늘어나 있는데, 수비수가 여기 맞춰 움직이면 공 떨어진
+                # 곳까지 일부러 느릿느릿 가는 것처럼 보인다. 수비수는 공이
+                # 떨어진 직후(t_flight + 짧은 여유) 안에 도착하도록 별도 페이스로.
+                fp = min(1.0, self.anim_t / max(0.3, tf + 0.5))
             self.fielder_positions[fb] = _lerp(home_pos, land, fp)
             if self._dp_throw and self.anim_t > tf:
                 self.fielder_positions[fb] = land

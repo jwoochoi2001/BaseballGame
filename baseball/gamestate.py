@@ -362,7 +362,14 @@ class LiveGame:
         elif kind == "out":
             rules_outs = self.outs_for_rules
             outs_to_add = plan.get("outs", 1)
-            ends_inning = rules_outs + outs_to_add >= C.OUTS_PER_INNING
+            if self.one_player:
+                # 1인 모드는 실제 이닝 교대가 없다 — 라운드에 배정된 아웃을
+                # 전부 소진하는 '진짜 마지막 아웃'일 때만 그 플레이의 득점이
+                # 무효가 되어야 한다(3아웃마다 무효가 되면 안 됨).
+                ends_inning = (self.solo_outs_used + outs_to_add
+                              >= self.solo_outs_limit())
+            else:
+                ends_inning = rules_outs + outs_to_add >= C.OUTS_PER_INNING
             score_before = tuple(self.score)
             pre = plan.get("bases_at_pitch", list(self.bases))
             if plan.get("tag_up") and rules_outs < C.OUTS_PER_INNING - 1:
@@ -590,14 +597,19 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
                         ball_type="ground", landing=fpos, field_by=fielder,
                         throw_to=F.B1, out_at_first=True, bases=0, outs=1,
                         double_play=False, sac_fly=False, error=False)
-        # 내야 사이로 빠지는 안타
-        roll_pt = F.polar(min(roll + 40, fence - 10), spray_deg)
+        # 내야 사이로 빠지는 안타 — 내야만 살짝 벗어난 정도로는 2루타가 안 되고,
+        # 담당 외야수 뒤까지 굴러가야(외야수 수비 위치보다 멀리) 2루타가 된다.
+        roll_dist = min(roll + 80, fence - 10)
+        roll_pt = F.polar(roll_dist, spray_deg)
         if F.is_foul_point(roll_pt):
             return _foul_plan(roll_pt)
-        bases_n = 2 if power > 0.58 and abs(spray_deg) > 15 else 1
+        gb_fielder = _outfielder_for(spray_deg)
+        gb_of_depth = F.dist_ft(F.HOME, F.FIELDERS_HOME[gb_fielder])
+        bases_n = (2 if power > 0.58 and abs(spray_deg) > 15
+                  and roll_dist > gb_of_depth else 1)
         return dict(kind="hit", label="안타!" if bases_n == 1 else "2루타!",
                     ball_type="ground", landing=roll_pt,
-                    field_by=_outfielder_for(spray_deg), throw_to=None,
+                    field_by=gb_fielder, throw_to=None,
                     bases=bases_n, outs=0, double_play=False,
                     sac_fly=False, error=False)
 
@@ -669,10 +681,18 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
                     double_play=False, sac_fly=can_tag and bases[2],
                     tag_up=can_tag, error=False)
 
-    # 안타(뜬공/라인성): 거리로 루타
-    if carry >= fence * 0.84 and random.random() < 0.42:
+    # 안타(뜬공/라인성): 거리로 루타 — 단, 담당 외야수보다 앞에(얕게) 떨어지면
+    # 외야수가 바로 달려들어 처리하므로 2루타 이상은 될 수 없다(무조건 안타).
+    # best 는 내야수일 수도 있으므로(짧은 블루퍼 등), 반드시 "실제 외야수" 기준으로
+    # 깊이를 계산해야 내야수만 살짝 넘긴 타구가 2루타로 되는 걸 막을 수 있다.
+    of_name = _outfielder_for(spray_deg)
+    of_depth = F.dist_ft(F.HOME, F.FIELDERS_HOME[of_name])
+    # 외야수가 정지해 있지 않고 타구 방향으로 반응해 움직이는 걸 감안해
+    # 정확히 수비 위치를 넘지 않아도(45ft 여유) 뒤로 빠진 것으로 인정한다.
+    past_fielder = carry > of_depth - 45
+    if past_fielder and carry >= fence * 0.84 and random.random() < 0.42:
         bases_n, label = 3, "3루타!"
-    elif carry >= fence * 0.68:
+    elif past_fielder:
         bases_n, label = 2, "2루타!"
     else:
         bases_n, label = 1, "안타!"
