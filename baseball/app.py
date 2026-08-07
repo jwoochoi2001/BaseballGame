@@ -1286,10 +1286,16 @@ class PlayScene:
                 c = C.GRAY if (out and pp > 0.85) else col
                 field.draw_runner(s, pos, c)
         else:
-            # 송구가 있는 플레이: 주자가 송구 도착 시점과 맞물려야 하므로
-            # 이 플레이의 anim_total 에 맞춰 뛴다(=송구와 경합하는 느낌).
-            p = min(1.0, self.anim_t / max(0.3, self.anim_total - 0.15))
+            # 송구가 있는 플레이: 주자가 송구와 경합하는 느낌이 나야 한다.
+            # - 세이프(내야안타 등): 기존처럼 송구 도착과 같은 시점(또는 살짝
+            #   먼저) 베이스에 닿아야 "송구보다 빨랐다"는 그림이 된다.
+            # - 아웃: 반대로 송구보다 살짝 늦게 도착해야 "송구에 걸려
+            #   아웃됐다"는 판정이 납득된다. 그래서 아웃 주자만 head-start(0.15)
+            #   없이(=송구가 도착하는 순간보다 뒤에) 도착하게 만든다.
+            p_safe = min(1.0, self.anim_t / max(0.3, self.anim_total - 0.15))
+            p_out = min(1.0, self.anim_t / max(0.3, self.anim_total))
             for start, end, out, col, t0 in self.runner_tracks:
+                p = p_out if out else p_safe
                 pp = 0.0 if p <= t0 else (p - t0) / max(1e-3, 1.0 - t0)
                 pos = _runner_pos(start, end, pp)
                 c = C.GRAY if (out and p > 0.85) else col

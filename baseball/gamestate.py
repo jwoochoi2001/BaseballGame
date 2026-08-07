@@ -690,7 +690,7 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
     # 외야수가 정지해 있지 않고 타구 방향으로 반응해 움직이는 걸 감안해
     # 정확히 수비 위치를 넘지 않아도(45ft 여유) 뒤로 빠진 것으로 인정한다.
     past_fielder = carry > of_depth - 45
-    if past_fielder and carry >= fence * 0.84 and random.random() < 0.42:
+    if past_fielder and carry >= fence * 0.88 and random.random() < 0.22:
         bases_n, label = 3, "3루타!"
     elif past_fielder:
         bases_n, label = 2, "2루타!"
