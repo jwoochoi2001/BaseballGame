@@ -48,7 +48,12 @@ RUNNER_STEP_SEC = 1.8   # 위 표에 없는 경우(이론상 없음)의 기본 �
 # 좌측 패널 위치(구종 선택 / S B O)
 LEFT_PANEL_X = 14
 PITCH_PANEL_Y = 112
+PITCH_PANEL_W = 228
 PITCH_PANEL_H = 190
+
+# 투수 교체 팝업 크기
+PITCHER_SUB_PW = 440
+PITCHER_SUB_PH = 260
 COUNT_PANEL_Y = PITCH_PANEL_Y + PITCH_PANEL_H + 10
 
 BASEPATH = [field.HOME, field.B1, field.B2, field.B3, field.HOME]
@@ -635,6 +640,24 @@ class PlayScene:
                                     "그만하기", size=26, color=C.ACCENT, hover=C.PANEL_LIGHT)
         self.btn_menu = Button((C.WIDTH - 96, C.HEIGHT - 40, 84, 32), "일시정지",
                                size=18, color=C.PANEL, hover=C.GRAY)
+
+        # 투수 교체
+        self.show_pitcher_sub = False
+        self.pitcher_sub_input = None
+        self.pitcher_sub_right = True
+        self.pitcher_sub_hand_btn = None
+        self.btn_pitcher_sub = Button(
+            (LEFT_PANEL_X + PITCH_PANEL_W - 12 - 64, PITCH_PANEL_Y + 8, 64, 44),
+            "교체", size=14, color=C.BLUE, hover=C.GOOD)
+        pw, ph = PITCHER_SUB_PW, PITCHER_SUB_PH
+        px, py = (C.WIDTH - pw) // 2, (C.HEIGHT - ph) // 2
+        self.btn_pitcher_sub_confirm = Button(
+            (px + 40, py + 180, 170, 54), "교체", size=24,
+            color=C.GOOD, hover=C.ACCENT2)
+        self.btn_pitcher_sub_cancel = Button(
+            (px + 230, py + 180, 170, 54), "닫기", size=24,
+            color=C.PANEL, hover=C.GRAY)
+
         self._begin_at_bat()
 
     # ------------------------------------------------ 흐름
@@ -711,6 +734,28 @@ class PlayScene:
     def _roll_speed(self):
         lo, hi = PITCHES[self.pitch_name]["speed"]
         self.pitch_speed = random.randint(lo, hi)
+
+    # ------------------------------------------------ 투수 교체
+    def _open_pitcher_sub(self):
+        pw = PITCHER_SUB_PW
+        px, py = (C.WIDTH - pw) // 2, (C.HEIGHT - PITCHER_SUB_PH) // 2
+        # 현재 투수 정보로 미리 채우지 않고 항상 기본값(플레이어/우투)으로 연다.
+        self.pitcher_sub_right = True
+        self.pitcher_sub_input = TextInput((px + 40, py + 92, 220, 48),
+                                           text="플레이어", max_len=8)
+        self.pitcher_sub_hand_btn = Button(
+            (px + 280, py + 92, 120, 48), "우투", size=20)
+        self.show_pitcher_sub = True
+
+    def _close_pitcher_sub(self, apply):
+        if apply:
+            g = self.game
+            team = g.defending_team
+            name = self.pitcher_sub_input.text.strip()
+            if name:
+                g.pitchers[team] = name
+            g.pitcher_right[team] = self.pitcher_sub_right
+        self.show_pitcher_sub = False
 
     def _pitch_time(self):
         # 게이지 스윕 시간 = 공 도달 시간. 실제 던진 구속이 빠를수록 게이지도 빠르다.
@@ -1038,8 +1083,31 @@ class PlayScene:
                     self.app.change_scene(MenuScene(self.app))
             return
 
+        if self.show_pitcher_sub:
+            self.pitcher_sub_hand_btn.update(mouse)
+            self.btn_pitcher_sub_confirm.update(mouse)
+            self.btn_pitcher_sub_cancel.update(mouse)
+            for e in events:
+                self.pitcher_sub_input.handle(e)
+                if self.pitcher_sub_hand_btn.clicked(e):
+                    self.pitcher_sub_right = not self.pitcher_sub_right
+                    self.pitcher_sub_hand_btn.text = (
+                        "우투" if self.pitcher_sub_right else "좌투")
+                elif self.btn_pitcher_sub_confirm.clicked(e):
+                    self._close_pitcher_sub(apply=True)
+                elif self.btn_pitcher_sub_cancel.clicked(e):
+                    self._close_pitcher_sub(apply=False)
+                elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+                    self._close_pitcher_sub(apply=False)
+            return
+
         self.btn_menu.update(mouse)
+        if self.phase == P_SELECT:
+            self.btn_pitcher_sub.update(mouse)
         for e in events:
+            if self.phase == P_SELECT and self.btn_pitcher_sub.clicked(e):
+                self._open_pitcher_sub()
+                return
             if self.btn_menu.clicked(e):
                 self.paused = True
                 return
@@ -1058,7 +1126,7 @@ class PlayScene:
                 self._try_select_pitch(e)
 
     def update(self, dt):
-        if self.paused:
+        if self.paused or self.show_pitcher_sub:
             return
 
         if self.swing_progress is not None and self.swing_progress < 1.0:
@@ -1269,6 +1337,8 @@ class PlayScene:
             self._draw_round_clear(s)
         if self.paused:
             self._draw_pause_overlay(s)
+        if self.show_pitcher_sub:
+            self._draw_pitcher_sub_modal(s)
 
     def _draw_defense(self, s, jersey_color):
         for name, pos in self.fielder_positions.items():
@@ -1466,9 +1536,11 @@ class PlayScene:
         draw_text(s, f"타석: {order}번 {name} ({hand})", 17, bx, ty,
                   C.BLACK, center=True, bold=True)
         if not g.one_player:
+            line1, line2 = g.current_batter_stats_lines()
             ty += 20
-            draw_text(s, g.current_batter_stats_compact(), 15, bx, ty,
-                      C.BLACK, center=True)
+            draw_text(s, line1, 15, bx, ty, C.BLACK, center=True)
+            ty += 18
+            draw_text(s, line2, 15, bx, ty, C.BLACK, center=True)
 
     def _draw_pitch_info(self, s):
         pass  # 구종/구속은 _draw_count_panel 아래에 표시
@@ -1499,7 +1571,7 @@ class PlayScene:
     def _draw_pitch_select(self, s):
         """2인 수비: 좌측 구종 선택 패널."""
         g = self.game
-        x, y, w, h = LEFT_PANEL_X, PITCH_PANEL_Y, 228, PITCH_PANEL_H
+        x, y, w, h = LEFT_PANEL_X, PITCH_PANEL_Y, PITCH_PANEL_W, PITCH_PANEL_H
         panel = pygame.Surface((w, h), pygame.SRCALPHA)
         panel.fill((10, 14, 22, 215))
         s.blit(panel, (x, y))
@@ -1513,6 +1585,7 @@ class PlayScene:
             hand = "우투" if g.pitcher_right[g.defending_team] else "좌투"
             draw_text(s, f"투수: {pitcher} ({hand})", 15, x + 12, y + 58,
                       C.ACCENT2)
+        self.btn_pitcher_sub.draw(s)
         draw_text(s, "구종을 선택하세요", 16, x + 12, y + 82, C.LIGHT_GRAY)
         if g.defending_team == 0:
             labels = ("[8] 패스트볼", "[9] 슬라이더", "[0] 커브")
@@ -1610,6 +1683,24 @@ class PlayScene:
                   C.LIGHT_GRAY, center=True)
         self.btn_resume.draw(s)
         self.btn_quit_game.draw(s)
+
+    def _draw_pitcher_sub_modal(self, s):
+        overlay = pygame.Surface((C.WIDTH, C.HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 165))
+        s.blit(overlay, (0, 0))
+        pw, ph = PITCHER_SUB_PW, PITCHER_SUB_PH
+        px = (C.WIDTH - pw) // 2
+        py = (C.HEIGHT - ph) // 2
+        panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        panel.fill((18, 22, 32, 245))
+        s.blit(panel, (px, py))
+        pygame.draw.rect(s, C.ACCENT2, (px, py, pw, ph), width=3, border_radius=14)
+        draw_text(s, "투수 교체", 32, px + pw // 2, py + 40, C.WHITE,
+                  center=True, bold=True)
+        self.pitcher_sub_input.draw(s)
+        self.pitcher_sub_hand_btn.draw(s)
+        self.btn_pitcher_sub_confirm.draw(s)
+        self.btn_pitcher_sub_cancel.draw(s)
 
     def _draw_inning_change(self, s):
         overlay = pygame.Surface((C.WIDTH, C.HEIGHT), pygame.SRCALPHA)
@@ -1776,14 +1867,14 @@ class GameOverScene:
             self.btn_stats.draw(s)
 
     def _draw_boxscore(self, s):
-        """양팀 타자 기록표(타수·안타·타점·홈런·볼넷·타율)."""
+        """양팀 타자 기록표(타수·안타·타점·홈런·볼넷·삼진·타율)."""
         g = self.game
         s.fill(C.DARK_PANEL)
         draw_text(s, "타자 기록", 40, C.WIDTH // 2, 44, C.WHITE,
                   center=True, bold=True)
 
-        col_w = (44, 92, 42, 42, 42, 42, 42, 60)
-        headers = ("타순", "이름", "타수", "안타", "타점", "홈런", "볼넷", "타율")
+        col_w = (38, 82, 38, 38, 38, 38, 38, 38, 56)
+        headers = ("타순", "이름", "타수", "안타", "타점", "홈런", "볼넷", "삼진", "타율")
         table_w = sum(col_w)
         gap = 36
         total_w = table_w * 2 + gap
@@ -1813,7 +1904,7 @@ class GameOverScene:
                 else:
                     avg_str = "-"
                 vals = (f"{slot + 1}", name, st["ab"], st["h"], st["rbi"],
-                        st["hr"], st["bb"], avg_str)
+                        st["hr"], st["bb"], st["k"], avg_str)
                 cx = tx
                 for w, val in zip(col_w, vals):
                     draw_text(s, str(val), 15, cx + w // 2, ry, C.WHITE,

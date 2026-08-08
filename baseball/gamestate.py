@@ -60,7 +60,7 @@ class LiveGame:
             self.solo_round_clear_pending = False
         else:
             self.batter_stats = [
-                [{"ab": 0, "h": 0, "hr": 0, "rbi": 0, "bb": 0} for _ in range(9)]
+                [{"ab": 0, "h": 0, "hr": 0, "rbi": 0, "bb": 0, "k": 0} for _ in range(9)]
                 for _ in range(2)
             ]
 
@@ -157,10 +157,17 @@ class LiveGame:
         return f"{self.inning}회 {'초' if self.half == 'top' else '말'}"
 
     def format_batter_stats_compact(self, team_idx, slot):
-        """타수·안타·타점·홈런·볼넷 (볼넷은 타수 미포함)."""
+        """타수·안타·타점·홈런·볼넷·삼진 (볼넷은 타수 미포함)."""
         st = self.batter_stats[team_idx][slot]
         return (f"{st['ab']}타수 {st['h']}안타 {st['rbi']}타점 "
-                f"{st['hr']}홈런 {st['bb']}볼넷")
+                f"{st['hr']}홈런 {st['bb']}볼넷 {st['k']}삼진")
+
+    def format_batter_stats_lines(self, team_idx, slot):
+        """인게임 표시용 — 화면(경기장)을 침범하지 않도록 두 줄로 나눠 반환."""
+        st = self.batter_stats[team_idx][slot]
+        line1 = f"{st['ab']}타수 {st['h']}안타 {st['rbi']}타점 {st['hr']}홈런"
+        line2 = f"{st['bb']}볼넷 {st['k']}삼진"
+        return line1, line2
 
     def format_batter_stat(self, team_idx, slot, name=None):
         """팀·타순별 타격 기록 문자열 (MVP 등)."""
@@ -173,6 +180,12 @@ class LiveGame:
         t = self.batting_team
         slot = self.batter_idx[t] % len(self.lineups[t])
         return self.format_batter_stats_compact(t, slot)
+
+    def current_batter_stats_lines(self):
+        """현재 타석 타자의 기록을 두 줄(타수~홈런 / 볼넷~삼진)로 반환."""
+        t = self.batting_team
+        slot = self.batter_idx[t] % len(self.lineups[t])
+        return self.format_batter_stats_lines(t, slot)
 
     def winning_team(self):
         if self.one_player or self.score[0] == self.score[1]:
@@ -200,7 +213,8 @@ class LiveGame:
                     stats=self.batter_stats[wt][best_slot],
                     line=self.format_batter_stat(wt, best_slot, name))
 
-    def _record_plate_appearance(self, *, walk=False, hit=False, hr=False, runs=0):
+    def _record_plate_appearance(self, *, walk=False, hit=False, hr=False,
+                                 runs=0, k=False):
         """팀별 타자 기록(동일 이름이라도 팀마다 분리)."""
         if self.one_player:
             return
@@ -215,6 +229,8 @@ class LiveGame:
             st["h"] += 1
         if hr:
             st["hr"] += 1
+        if k:
+            st["k"] += 1
         st["rbi"] += runs
 
     # ----------------------------------------------------------- 이닝 진행
@@ -297,7 +313,7 @@ class LiveGame:
 
     # ----------------------------------------------------------- 결과 반영
     def strikeout(self):
-        self._record_plate_appearance()
+        self._record_plate_appearance(k=True)
         self.next_batter()
         if self.one_player:
             self.solo_last_gain = 0
