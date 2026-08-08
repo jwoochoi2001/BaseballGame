@@ -46,6 +46,10 @@ RUNNER_SEGMENT_TIME = {1: 1.8, 2: 2.8, 3: 3.6, 4: 4.3}
 RUNNER_STEP_SEC = 1.8   # 위 표에 없는 경우(이론상 없음)의 기본 세그먼트당 시간
 REL_THROW_DELAY = 0.5   # 외야수가 공을 잡은(t_flight) 후 중계 송구를 시작하기까지 지연
 REL_THROW_LEG = 0.85    # 중계 송구 한 구간(외야수→중계수비수, 중계수비수→3루수) 시간
+GAP_LEG1_FRAC = 0.55    # gap_pass_dist 정보가 없을 때(안전장치) 쓰는 기본 거리 비중
+GAP_LEG1_SPEED = 230.0  # 내야수를 스쳐 지나가기 전까지 속도(ft/s, 직선타 아웃과 비슷)
+GAP_LEG2_SPEED = 130.0  # 내야수를 지나 외야 쪽으로 흘러갈 때 속도(ft/s, 느려짐)
+UMPIRE_STEP_SPEED = 16.0  # 심판이 수비수를 피할 때 실제로 걸어서 움직이는 속도(ft/s)
 
 # 좌측 패널 위치(구종 선택 / S B O)
 LEFT_PANEL_X = 14
@@ -150,7 +154,7 @@ HELP_LINES = [
     ("body", "· 투구 시 좌측 S/B/O 패널 아래에 구종·구속이 표시됩니다"),
     ("gap", ""),
     ("head", "타구 결과"),
-    ("body", "· 안타·2루타·3루타·홈런, 내야 안타, 실책 출루"),
+    ("body", "· 안타·2루타·3루타·홈런, 내야 안타, 실책"),
     ("body", "· 홈런: 솔로/2·3·만루·그랜드슬램 멘트, 득점 시 +N점 표시"),
     ("body", "· 득점 안타: 「N타점 적시타」 멘트(안타·1루타·2루타 등)"),
     ("body", "· 내야: 땅볼 아웃·송구, 내야 직선타 아웃"),
@@ -555,6 +559,16 @@ def _lerp(a, b, p):
     return (a[0] + (b[0] - a[0]) * p, a[1] + (b[1] - a[1]) * p)
 
 
+def _step_toward(cur, target, speed, dt):
+    """cur 에서 target 방향으로 speed(ft/s)만큼만 이동(순간이동 방지)."""
+    dx, dy = target[0] - cur[0], target[1] - cur[1]
+    dist = math.hypot(dx, dy)
+    step = speed * dt
+    if dist <= step or dist < 1e-6:
+        return target
+    return (cur[0] + dx / dist * step, cur[1] + dy / dist * step)
+
+
 _OUTFIELD = ("좌익수", "중견수", "우익수")
 _OUTFIELD_SHIFT_MIN_FT = 115.0
 
@@ -632,6 +646,11 @@ class PlayScene:
         self._of_relay = False
         self._of_relay_first = None
         self._of_relay_final = None
+        self._gap_pass_frac = GAP_LEG1_FRAC
+        self._gap_t1 = 0.0
+        self._gap_mid = field.HOME
+        self._ump_disp = {"1B": field.UMPIRE_1B, "2B": field.UMPIRE_2B,
+                          "3B": field.UMPIRE_3B}
 
         self.result_text = ""
         self.result_color = C.WHITE
@@ -726,6 +745,9 @@ class PlayScene:
         self.anim_total = 0.0
         self._runner_free_pace = False
         self._of_relay = False
+        self._gap_pass_frac = GAP_LEG1_FRAC
+        self._gap_t1 = 0.0
+        self._gap_mid = field.HOME
         if self.game.is_over():
             self.app.change_scene(GameOverScene(self.app, self.game))
             return
@@ -862,10 +884,8 @@ class PlayScene:
             elif self.game.is_over() and self.game.game_tied:
                 self._show_result("경기 종료\n무승부", C.ACCENT2,
                                   long_display=True)
-            elif kind == "look":
-                self._show_result("루킹 삼진!", C.ACCENT)
             else:
-                self._show_result("삼진 아웃!", C.ACCENT)
+                self._show_result("STRIKE OUT!", C.ACCENT)
         else:
             self._show_result(f"스트라이크 (S{self.strikes})", C.ACCENT2,
                               re_pitch=True)
@@ -888,6 +908,21 @@ class PlayScene:
             self.t_flight = {"ground": 1.0, "fly": 1.35, "liner": 0.6}.get(bt, 1.35)
             if bt == "fly" and plan["kind"] == "hr":
                 self.t_flight = 1.7
+            if bt == "gap":
+                # 실제로 그 내야수 옆을 스쳐 지나가는 지점(gap_pass_dist)까지는
+                # 빠르게, 그 이후 외야 쪽으로 흘러갈 때는 느려지도록 두 구간
+                # 속도를 정해서 거리 기반으로 소요 시간을 계산한다.
+                total_dist = field.dist_ft(field.HOME, plan["landing"])
+                pass_dist = plan.get("gap_pass_dist", total_dist * GAP_LEG1_FRAC)
+                pass_dist = min(pass_dist, total_dist * 0.9) if total_dist > 0 else 0.0
+                self._gap_pass_frac = (pass_dist / total_dist) if total_dist > 0 else GAP_LEG1_FRAC
+                self._gap_t1 = pass_dist / GAP_LEG1_SPEED
+                gap_t2 = max(0.0, total_dist - pass_dist) / GAP_LEG2_SPEED
+                self.t_flight = self._gap_t1 + gap_t2
+                # 내야수 몸을 그대로 관통하지 않도록, 통과 지점을 내야수 옆으로
+                # 살짝 밀어낸다 — 직선으로 뚫는 게 아니라 옆으로 비켜 나가는 궤적.
+                straight_mid = _lerp(field.HOME, plan["landing"], self._gap_pass_frac)
+                self._gap_mid = self._avoid_infielders(straight_mid)
             throw = plan.get("throw_to") is not None and plan["kind"] in ("out", "hit", "error")
             self._dp_throw = bool(plan.get("double_play"))
             self._has_throw = throw and bt == "ground"
@@ -898,7 +933,10 @@ class PlayScene:
             elif self._dp_throw:
                 self.anim_total = self.t_flight + self._dp_t1 + self._dp_t2 + 0.18
             else:
-                self.anim_total = self.t_flight + (0.7 if self._has_throw else 0.4)
+                # +0.55: 수비수 도착 페이스(tf+0.5)가 다 끝날 때까지는 애니메이션이
+                # 유지되도록 여유를 준다(그보다 짧으면 수비수가 도착하기 전에
+                # 다음 타석으로 넘어가 버린다).
+                self.anim_total = self.t_flight + (0.7 if self._has_throw else 0.55)
 
         # 주자 트랙 구성.
         # - 송구(1루 송구/포스아웃/병살)가 있는 플레이는 주자가 "송구와 경합"하는
@@ -918,6 +956,13 @@ class PlayScene:
         self._of_relay = bool(plan.get("relay_fielder"))
         self._of_relay_first = plan.get("relay_fielder")
         self._of_relay_final = plan.get("relay_final")
+        if self._of_relay:
+            # 중계 송구가 끝까지(내야수가 공을 받을 때까지) 다 보이도록 그
+            # 시점까지 애니메이션을 늘려둔다 — 안 그러면 송구 도중에 다음
+            # 타석으로 넘어가 버린다.
+            relay_legs = 2 if self._of_relay_final else 1
+            relay_end = self.t_flight + REL_THROW_DELAY + REL_THROW_LEG * relay_legs
+            self.anim_total = max(self.anim_total, relay_end + 0.2)
 
         # 판정(안타/아웃/홈런 등)이 확정되는 시점.
         # - 홈런·1루타·실책은 공이 담장을 넘거나 떨어지는 순간 이미 결과가
@@ -1148,6 +1193,12 @@ class PlayScene:
         if self.swing_progress is not None and self.swing_progress < 1.0:
             self.swing_progress = min(1.0, self.swing_progress + dt / SWING_ANIM_SEC)
 
+        for key, home in (("1B", field.UMPIRE_1B), ("2B", field.UMPIRE_2B),
+                          ("3B", field.UMPIRE_3B)):
+            target = self._umpire_pos(home)
+            self._ump_disp[key] = _step_toward(self._ump_disp[key], target,
+                                               UMPIRE_STEP_SPEED, dt)
+
         if self.phase == P_READY:
             self.timer -= dt
             if self.timer <= 0:
@@ -1224,6 +1275,20 @@ class PlayScene:
             tp = min(1.0, (self.anim_t - tf) / 0.55)
             self.ball_pos = _lerp(land, plan["throw_to"], tp)
             self.ball_h = 12.0 * math.sin(math.pi * tp)
+        elif plan["ball_type"] == "gap":
+            # 1-2루간/3-유간/라인 안타: 실제로 그 내야수 옆을 스쳐 지나가는
+            # 지점(gap_pass_dist)까지는 직선타 아웃과 비슷하게 빠르게, 내야수를
+            # 지나고 나면(외야 쪽으로 흘러갈 때) 느려진다.
+            mid = self._gap_mid
+            t1 = self._gap_t1
+            t2 = max(0.05, self.t_flight - t1)
+            if self.anim_t <= t1:
+                tp = self.anim_t / max(0.05, t1)
+                self.ball_pos = _lerp(field.HOME, mid, tp)
+            else:
+                tp = min(1.0, (self.anim_t - t1) / t2)
+                self.ball_pos = _lerp(mid, land, tp)
+            self.ball_h = 4.0
         else:
             self.ball_pos = _lerp(field.HOME, land, p)
             if plan["ball_type"] == "foul":
@@ -1277,6 +1342,13 @@ class PlayScene:
             home_pos = field.FIELDERS_HOME[fb]
             if plan["kind"] == "out":
                 fp = min(1.0, p * 1.05)
+            elif plan.get("ball_type") == "gap":
+                # 1-2루간/3-유간/라인 안타: 공이 내야를 완전히 빠져나가기
+                # 전까지는 담당 외야수가 미리 반응하지 않다가, 빠져나간
+                # 뒤에야 살짝 앞으로 걸어 나와 공을 잡는다.
+                delay = self._gap_t1
+                span = max(0.3, (tf + 0.5) - delay)
+                fp = min(1.0, max(0.0, self.anim_t - delay) / span)
             else:
                 # 안타(특히 2·3루타)는 주자를 다 뛰게 하려고 anim_total 이
                 # 길게 늘어나 있는데, 수비수가 여기 맞춰 움직이면 공 떨어진
@@ -1362,6 +1434,9 @@ class PlayScene:
         self._draw_defense(s, def_col)
         field.draw_catcher(s, def_col)
         field.draw_umpire(s)
+        field.draw_umpire(s, self._ump_disp["1B"])
+        field.draw_umpire(s, self._ump_disp["2B"])
+        field.draw_umpire(s, self._ump_disp["3B"])
         field.draw_batter(s, right_handed=self.game.batter_is_right(),
                           swing=self.swing_progress or 0.0, jersey_color=off_col)
 
@@ -1399,6 +1474,32 @@ class PlayScene:
             self._draw_pause_overlay(s)
         if self.show_pitcher_sub:
             self._draw_pitcher_sub_modal(s)
+
+    def _umpire_pos(self, home_pos, min_dist=20.0):
+        """수비수가 다가오면(수비 애니메이션 중) 심판이 살짝 비켜서게 한다."""
+        px, py = home_pos
+        for fx, fy in self.fielder_positions.values():
+            dx, dy = px - fx, py - fy
+            dist = math.hypot(dx, dy)
+            if 1e-3 < dist < min_dist:
+                push = min_dist - dist
+                px += dx / dist * push
+                py += dy / dist * push
+        return (px, py)
+
+    def _avoid_infielders(self, pt, min_dist=16.0):
+        """1-2루간/3-유간/라인 안타의 통과 지점이 내야수 몸을 관통하지 않도록
+        옆으로 밀어낸다(내야수 홈 포지션 기준)."""
+        px, py = pt
+        for name in ("1루수", "2루수", "유격수", "3루수"):
+            fx, fy = field.FIELDERS_HOME[name]
+            dx, dy = px - fx, py - fy
+            dist = math.hypot(dx, dy)
+            if 1e-3 < dist < min_dist:
+                push = min_dist - dist
+                px += dx / dist * push
+                py += dy / dist * push
+        return (px, py)
 
     def _draw_defense(self, s, jersey_color):
         for name, pos in self.fielder_positions.items():

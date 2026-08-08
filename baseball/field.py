@@ -47,6 +47,10 @@ FIELDERS_HOME = {
 }
 CATCHER = (0.0, -9.0)
 UMPIRE = (0.0, -15.0)
+# 루심(1루심/3루심은 파울 라인 밖으로, 2루심은 2루 뒤 얕은 외야 쪽으로)
+UMPIRE_1B = (78.0, 60.0)
+UMPIRE_3B = (-78.0, 60.0)
+UMPIRE_2B = (24.0, 152.0)
 
 # ---------------------------------------------------------------- 화면 변환
 SB_H = 104                       # 전광판 높이
@@ -491,8 +495,9 @@ def draw_catcher(surface, cap_color=C.TEAM_AWAY):
     pygame.draw.circle(surface, C.CAP_GLOVE, (x, y + 8), 5)     # 미트
 
 
-def draw_umpire(surface):
-    x, y = to_screen(*UMPIRE)
+def draw_umpire(surface, pos=UMPIRE):
+    """심판(주심/1루심/2루심/3루심 공통 — 위치만 다르고 모양은 동일)."""
+    x, y = to_screen(*pos)
     pygame.draw.ellipse(surface, (30, 70, 34), (x - 9, y + 4, 18, 6))
     pygame.draw.circle(surface, C.UMP_COLOR, (x, y), 9)
     pygame.draw.circle(surface, (90, 94, 104), (x, y - 1), 5)   # 헬멧

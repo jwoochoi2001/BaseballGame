@@ -439,6 +439,8 @@ FLY_CARRY_MULT = 315.0
 FLY_LB_PEAK = 32.0
 FLY_LB_WIDTH = 30.0
 FLY_LB_FLOOR = 0.4
+FLY_CATCH_RADIUS = 26.0     # BABIP .380 근처로 맞춤(캐치 판정 반경)
+LINER_CATCH_RADIUS = 28.0
 _XBH_CUSHION_BASE_FT = 5.0     # 외야수 정면 바로 앞 기본 여유(ft) — 정면은 이 정도만
 _XBH_CUSHION_LATERAL_FT = 3.9  # 정면 각도에서 벗어난 정도(도)당 추가 여유(ft, 갭/라인일수록 커짐)
 RELEASE = 0.55               # 포구 후 송구까지 지연
@@ -569,13 +571,25 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
                 reach = min(reach, PITCHER_GROUND_REACH_FT)
             if perp <= reach:
                 can.append((proj, name, t))
+        # 1-2루간/3-유간, 1루수-1루/3루수-3루 사이 라인 쪽은 폭이 좁아서(1-2/3-유간
+        # 약 50ft) reach 계산상 거의 항상 누군가 잡는 걸로 나온다. 실제로는
+        # 강하게 잡아당긴 타구가 그 좁은 틈을 그대로 꿰뚫는 경우가 있으므로,
+        # 그 방향으로 강하게 맞은 타구는 낮은 확률로 그대로 빠지게 한다.
+        # (1-2루간/3-유간이 라인 쪽보다 훨씬 자주 나오도록 확률을 따로 둔다.)
+        if can and power > _INFIELD_GAP_POWER_MIN:
+            if any(lo <= spray_deg <= hi for lo, hi in _INFIELD_MID_GAP_BANDS):
+                if random.random() < _INFIELD_MID_GAP_STEAL_PROB:
+                    can = []
+            elif any(lo <= spray_deg <= hi for lo, hi in _INFIELD_LINE_GAP_BANDS):
+                if random.random() < _INFIELD_LINE_GAP_STEAL_PROB:
+                    can = []
         if can:
             can.sort()
             proj, fielder, t = can[0]
             fpos = F.FIELDERS_HOME[fielder]
             # 실책
             if random.random() < 0.06:
-                return dict(kind="error", label="실책 출루", ball_type="ground",
+                return dict(kind="error", label="실책", ball_type="ground",
                             landing=fpos, field_by=fielder, throw_to=F.B1,
                             bases=1, outs=0, double_play=False,
                             sac_fly=False, error=True)
@@ -628,15 +642,21 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
             return _foul_plan(roll_pt)
         gb_fielder = _outfielder_for(spray_deg)
         gb_of_depth = F.dist_ft(F.HOME, F.FIELDERS_HOME[gb_fielder])
-        bases_n = (2 if power > 0.58 and abs(spray_deg) > 15
-                  and roll_dist > gb_of_depth else 1)
+        # 1-2루간/3-유간(내야수 두 명 사이)은 항상 1루타로만 처리한다.
+        in_mid_gap = (_GAP_3B_LINE_DEG < spray_deg <= _GAP_3B_SS_DEG
+                     or _GAP_2B_1B_DEG < spray_deg <= _GAP_1B_LINE_DEG)
+        bases_n = 1 if in_mid_gap else (
+            2 if power > 0.58 and abs(spray_deg) > 15
+            and roll_dist > gb_of_depth else 1)
         relay_fielder, relay_final = _relay_plan(bases_n, spray_deg)
-        return dict(kind="hit", label="안타!" if bases_n == 1 else "2루타!",
-                    ball_type="ground", landing=roll_pt,
+        label = _gap_label(spray_deg) if bases_n == 1 else "2루타!"
+        return dict(kind="hit", label=label,
+                    ball_type="gap", landing=roll_pt,
                     field_by=gb_fielder, throw_to=None,
                     bases=bases_n, outs=0, double_play=False,
                     sac_fly=False, error=False,
-                    relay_fielder=relay_fielder, relay_final=relay_final)
+                    relay_fielder=relay_fielder, relay_final=relay_final,
+                    gap_pass_dist=_gap_pass_dist(spray_deg))
 
     # ---------------------------------------------------- 뜬공 / 라인드라이브 / 팝업
     if launch_deg >= 50:  # 팝업
@@ -653,12 +673,12 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
     if liner:
         carry = 130 + power * 180
         hang = 0.6 + power * 0.5
-        radius = 12
+        radius = LINER_CATCH_RADIUS
     else:  # 뜬공
         lb = max(FLY_LB_FLOOR, 1 - ((launch_deg - FLY_LB_PEAK) / FLY_LB_WIDTH) ** 2)
         carry = (FLY_CARRY_BASE + power * FLY_CARRY_MULT) * lb
         hang = 1.3 + (launch_deg / 45.0) * 2.0 + power * 0.5
-        radius = 10
+        radius = FLY_CATCH_RADIUS
 
     # 홈런
     if not liner and carry >= fence:
@@ -766,6 +786,52 @@ def _outfielder_for(spray_deg):
     if spray_deg > 15:
         return "우익수"
     return "중견수"
+
+
+# 내야수 사이를 빠져나가는 안타의 통과 지점(각도 기준, 실제 내야수 배치각과 매칭)
+_GAP_3B_LINE_DEG = -34.0    # 3루수 라인 밖(3루 라인)
+_GAP_3B_SS_DEG = -16.5      # 3루수-유격수 사이
+_GAP_2B_1B_DEG = 16.5       # 2루수-1루수 사이
+_GAP_1B_LINE_DEG = 34.0     # 1루수 라인 밖(1루 라인)
+# 3루수-유격수 / 2루수-1루수 사이(1-2루간/3-유간) — 강습타가 두 내야수 사이를
+# 그대로 꿰뚫을 수 있는 구간. 라인 쪽보다 훨씬 자주 나오게 확률을 높게 둔다.
+_INFIELD_MID_GAP_BANDS = ((16.0, 34.0), (-34.0, -16.0))
+_INFIELD_MID_GAP_STEAL_PROB = 0.78
+# 1루수-1루 베이스 / 3루수-3루 베이스 사이 좁은 라인 쪽 틈 — 드물게만 나온다.
+_INFIELD_LINE_GAP_BANDS = ((34.0, 44.5), (-44.5, -34.0))
+_INFIELD_LINE_GAP_STEAL_PROB = 0.5
+_INFIELD_GAP_POWER_MIN = 0.45
+
+
+def _gap_label(spray_deg):
+    """내야를 빠져나가는 안타의 통과 구간별 안내 문구."""
+    if spray_deg <= _GAP_3B_LINE_DEG:
+        return "안타! (3루 라인)"
+    if spray_deg <= _GAP_3B_SS_DEG:
+        return "안타! (3-유간)"
+    if spray_deg <= _GAP_2B_1B_DEG:
+        return "안타! (센터 앞)"
+    if spray_deg <= _GAP_1B_LINE_DEG:
+        return "안타! (1-2루간)"
+    return "안타! (1루 라인)"
+
+
+_CORNER_INFIELD_DEPTH = F.dist_ft(F.HOME, F.FIELDERS_HOME["1루수"])   # == 3루수
+_MID_INFIELD_DEPTH = F.dist_ft(F.HOME, F.FIELDERS_HOME["2루수"])      # == 유격수
+_GAP_PASS_DEPTH = (_CORNER_INFIELD_DEPTH + _MID_INFIELD_DEPTH) / 2.0
+
+
+def _gap_pass_dist(spray_deg):
+    """내야를 빠져나가는 안타가 실제로 내야수 옆을 스쳐 지나가는 거리(ft).
+
+    라인 쪽(1루/3루수 라인 밖)은 그 코너 내야수 깊이, 1-2루간/3-유간은 두
+    내야수 깊이의 중간, 센터는 중견수 쪽 내야수(2루수/유격수) 깊이를 쓴다.
+    """
+    if spray_deg <= _GAP_3B_LINE_DEG or spray_deg > _GAP_1B_LINE_DEG:
+        return _CORNER_INFIELD_DEPTH
+    if spray_deg <= _GAP_3B_SS_DEG or spray_deg > _GAP_2B_1B_DEG:
+        return _GAP_PASS_DEPTH
+    return _MID_INFIELD_DEPTH
 
 
 def _relay_plan(bases_n, spray_deg):

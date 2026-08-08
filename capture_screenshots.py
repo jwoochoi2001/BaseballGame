@@ -142,7 +142,7 @@ def capture_all():
     # 2인 — 삼진
     s = _play_scene(_make_2p_game())
     s.phase = P_RESULT
-    s.result_text = "삼진 아웃!"
+    s.result_text = "STRIKE OUT!"
     s.result_color = C.ACCENT
     _save(s, "11_result_strikeout.png")
 
