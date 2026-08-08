@@ -434,6 +434,13 @@ class LiveGame:
 RUN_HOME_TO_FIRST = 4.1     # 타자주자 1루 도달 시간(초)
 THROW_SPEED = 115.0          # 송구 속도(ft/s)
 FIELDER_SPEED = 27.0         # 수비 이동 속도(ft/s)
+FLY_CARRY_BASE = 160.0
+FLY_CARRY_MULT = 315.0
+FLY_LB_PEAK = 32.0
+FLY_LB_WIDTH = 30.0
+FLY_LB_FLOOR = 0.4
+_XBH_CUSHION_BASE_FT = 5.0     # 외야수 정면 바로 앞 기본 여유(ft) — 정면은 이 정도만
+_XBH_CUSHION_LATERAL_FT = 3.9  # 정면 각도에서 벗어난 정도(도)당 추가 여유(ft, 갭/라인일수록 커짐)
 RELEASE = 0.55               # 포구 후 송구까지 지연
 CATCH_TIME_CAP = 2.55        # 낙구 지점까지 달릴 수 있는 시간 상한
 PITCHER_GROUND_REACH_FT = 6.0  # 투수 땅볼 수비 폭(정면 강습타만, 좌우로 넓게 못 감)
@@ -623,11 +630,13 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
         gb_of_depth = F.dist_ft(F.HOME, F.FIELDERS_HOME[gb_fielder])
         bases_n = (2 if power > 0.58 and abs(spray_deg) > 15
                   and roll_dist > gb_of_depth else 1)
+        relay_fielder, relay_final = _relay_plan(bases_n, spray_deg)
         return dict(kind="hit", label="안타!" if bases_n == 1 else "2루타!",
                     ball_type="ground", landing=roll_pt,
                     field_by=gb_fielder, throw_to=None,
                     bases=bases_n, outs=0, double_play=False,
-                    sac_fly=False, error=False)
+                    sac_fly=False, error=False,
+                    relay_fielder=relay_fielder, relay_final=relay_final)
 
     # ---------------------------------------------------- 뜬공 / 라인드라이브 / 팝업
     if launch_deg >= 50:  # 팝업
@@ -646,8 +655,8 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
         hang = 0.6 + power * 0.5
         radius = 12
     else:  # 뜬공
-        lb = max(0.4, 1 - ((launch_deg - 32) / 30.0) ** 2)
-        carry = (160 + power * 315) * lb
+        lb = max(FLY_LB_FLOOR, 1 - ((launch_deg - FLY_LB_PEAK) / FLY_LB_WIDTH) ** 2)
+        carry = (FLY_CARRY_BASE + power * FLY_CARRY_MULT) * lb
         hang = 1.3 + (launch_deg / 45.0) * 2.0 + power * 0.5
         radius = 10
 
@@ -697,24 +706,31 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
                     double_play=False, sac_fly=can_tag and bases[2],
                     tag_up=can_tag, error=False)
 
-    # 안타(뜬공/라인성): 거리로 루타 — 단, 담당 외야수보다 앞에(얕게) 떨어지면
-    # 외야수가 바로 달려들어 처리하므로 2루타 이상은 될 수 없다(무조건 안타).
-    # best 는 내야수일 수도 있으므로(짧은 블루퍼 등), 반드시 "실제 외야수" 기준으로
-    # 깊이를 계산해야 내야수만 살짝 넘긴 타구가 2루타로 되는 걸 막을 수 있다.
+    # 안타(뜬공/라인성): 거리로 루타 — 담당 외야수 "정면" 바로 앞(얕게)에 떨어지면
+    # 예외 없이 무조건 안타(1루타)다. best 는 내야수일 수도 있으므로(짧은 블루퍼 등),
+    # 반드시 "실제 외야수" 기준으로 깊이를 계산해야 내야수만 살짝 넘긴 타구가
+    # 2루타로 되는 걸 막을 수 있다.
     of_name = _outfielder_for(spray_deg)
-    of_depth = F.dist_ft(F.HOME, F.FIELDERS_HOME[of_name])
-    # 외야수가 정지해 있지 않고 타구 방향으로 반응해 움직이는 걸 감안해
-    # 정확히 수비 위치를 넘지 않아도(45ft 여유) 뒤로 빠진 것으로 인정한다.
-    past_fielder = carry > of_depth - 45
+    of_x, of_y = F.FIELDERS_HOME[of_name]
+    of_depth = F.dist_ft(F.HOME, (of_x, of_y))
+    # 다만 "그 외야수 정면"이 아니라 두 외야수 사이 갭이나 라인 쪽으로 가면
+    # 담당 외야수가 비스듬히 뛰어야 해서 커버 범위가 줄어드는 만큼, 그 정도로
+    # 갈수록만 살짝 못 미쳐도 이미 빠진 것으로 인정한다(정면은 예외 없이 안타).
+    of_center_deg = math.degrees(math.atan2(of_x, of_y))
+    lateral_off = abs(spray_deg - of_center_deg)
+    cushion = _XBH_CUSHION_BASE_FT + _XBH_CUSHION_LATERAL_FT * lateral_off
+    past_fielder = carry > of_depth - cushion
     if past_fielder and carry >= fence * 0.88 and random.random() < 0.22:
         bases_n, label = 3, "3루타!"
     elif past_fielder:
         bases_n, label = 2, "2루타!"
     else:
         bases_n, label = 1, "안타!"
+    relay_fielder, relay_final = _relay_plan(bases_n, spray_deg)
     return dict(kind="hit", label=label, ball_type="fly", landing=land,
                 field_by=best, throw_to=None, bases=bases_n, outs=0,
-                double_play=False, sac_fly=False, error=False)
+                double_play=False, sac_fly=False, error=False,
+                relay_fielder=relay_fielder, relay_final=relay_final)
 
 
 _LINER_SNAG_FIELDERS = ("1루수", "2루수", "유격수", "3루수")
@@ -750,3 +766,21 @@ def _outfielder_for(spray_deg):
     if spray_deg > 15:
         return "우익수"
     return "중견수"
+
+
+def _relay_plan(bases_n, spray_deg):
+    """2·3루타 확정 후의 (연출용) 중계 송구 계획 — 베이스가 아니라 그 근처
+    내야수(2루수/유격수)에게 공을 준다. 좌측 타구는 유격수, 우측 타구는
+    2루수가 중계를 선다(중견수 정면은 유격수 기준). 2루타는 그 내야수가
+    받으면 끝, 3루타는 그 내야수를 거쳐 3루수에게 한 번 더 송구한다.
+    결과(세이프)에는 영향 없는 연출용 정보.
+    """
+    if bases_n == 2:
+        return _of_relay_infielder(spray_deg), None
+    if bases_n == 3:
+        return _of_relay_infielder(spray_deg), "3루수"
+    return None, None
+
+
+def _of_relay_infielder(spray_deg):
+    return "유격수" if spray_deg <= 0 else "2루수"

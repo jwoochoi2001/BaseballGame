@@ -44,6 +44,8 @@ SWING_ANIM_SEC = 0.30
 # 루타별로 따로 정한다(1루타 1.8초 기준, 뒤로 갈수록 세그먼트당 증가폭은 줄어듦).
 RUNNER_SEGMENT_TIME = {1: 1.8, 2: 2.8, 3: 3.6, 4: 4.3}
 RUNNER_STEP_SEC = 1.8   # 위 표에 없는 경우(이론상 없음)의 기본 세그먼트당 시간
+REL_THROW_DELAY = 0.5   # 외야수가 공을 잡은(t_flight) 후 중계 송구를 시작하기까지 지연
+REL_THROW_LEG = 0.85    # 중계 송구 한 구간(외야수→중계수비수, 중계수비수→3루수) 시간
 
 # 좌측 패널 위치(구종 선택 / S B O)
 LEFT_PANEL_X = 14
@@ -546,6 +548,7 @@ P_BATTED = "batted"
 P_RESULT = "result"
 P_INNING_CHANGE = "inning_change"
 P_ROUND_CLEAR = "round_clear"
+P_PITCHER_CHANGE = "pitcher_change"
 
 
 def _lerp(a, b, p):
@@ -626,6 +629,9 @@ class PlayScene:
         self.fielder_positions = dict(field.FIELDERS_HOME)
         self.runner_tracks = []   # (start_idx, end_idx, out, color)
         self._runner_free_pace = False
+        self._of_relay = False
+        self._of_relay_first = None
+        self._of_relay_final = None
 
         self.result_text = ""
         self.result_color = C.WHITE
@@ -719,6 +725,7 @@ class PlayScene:
         self.anim_t = 0.0
         self.anim_total = 0.0
         self._runner_free_pace = False
+        self._of_relay = False
         if self.game.is_over():
             self.app.change_scene(GameOverScene(self.app, self.game))
             return
@@ -748,6 +755,7 @@ class PlayScene:
         self.show_pitcher_sub = True
 
     def _close_pitcher_sub(self, apply):
+        self.show_pitcher_sub = False
         if apply:
             g = self.game
             team = g.defending_team
@@ -755,7 +763,8 @@ class PlayScene:
             if name:
                 g.pitchers[team] = name
             g.pitcher_right[team] = self.pitcher_sub_right
-        self.show_pitcher_sub = False
+            self.phase = P_PITCHER_CHANGE
+            self.timer = 1.6
 
     def _pitch_time(self):
         # 게이지 스윕 시간 = 공 도달 시간. 실제 던진 구속이 빠를수록 게이지도 빠르다.
@@ -902,6 +911,13 @@ class PlayScene:
             needed = max(t0 + _runner_duration(abs(end - start))
                         for start, end, out, col, t0 in self.runner_tracks)
             self.anim_total = max(self.anim_total, needed + 0.15)
+
+        # 2·3루타 연출용 중계 송구(결과에는 영향 없음) — 외야수가 공을 잡고
+        # 가만히 서 있지 않도록, 잡은 뒤 근처 내야수(2루수/유격수)에게 공을
+        # 준다. 베이스가 아니라 그 내야수의 실제 수비 위치가 목표 지점.
+        self._of_relay = bool(plan.get("relay_fielder"))
+        self._of_relay_first = plan.get("relay_fielder")
+        self._of_relay_final = plan.get("relay_final")
 
         # 판정(안타/아웃/홈런 등)이 확정되는 시점.
         # - 홈런·1루타·실책은 공이 담장을 넘거나 떨어지는 순간 이미 결과가
@@ -1176,6 +1192,10 @@ class PlayScene:
             self.timer -= dt
             if self.timer <= 0:
                 self._begin_at_bat()
+        elif self.phase == P_PITCHER_CHANGE:
+            self.timer -= dt
+            if self.timer <= 0:
+                self.phase = P_SELECT
 
     def _update_batted(self):
         plan = self.plan
@@ -1212,6 +1232,44 @@ class PlayScene:
                 self.ball_h = 120.0 * math.sin(math.pi * p) * (1.4 if plan["kind"] == "hr" else 1.0)
             else:
                 self.ball_h = 4.0
+
+        # 2·3루타 중계 송구(연출용) — 외야수가 공을 잡은 뒤(수비수 도착 페이스와
+        # 맞춰) 베이스가 아니라 근처 내야수(2루수/유격수, 3루타는 3루수까지 한
+        # 번 더)에게 공을 준다. 결과에는 영향 없이 그림만 그린다.
+        if self._of_relay and self.anim_t > tf:
+            first_pt = field.FIELDERS_HOME[self._of_relay_first]
+            leg = REL_THROW_LEG
+            start = tf + REL_THROW_DELAY
+            if self._of_relay_final:
+                final_pt = field.FIELDERS_HOME[self._of_relay_final]
+                t1_end = start + leg
+                t2_end = t1_end + leg
+                if self.anim_t <= start:
+                    self.ball_pos = land
+                    self.ball_h = 0.0
+                elif self.anim_t <= t1_end:
+                    tp = (self.anim_t - start) / leg
+                    self.ball_pos = _lerp(land, first_pt, tp)
+                    self.ball_h = 8.0 * math.sin(math.pi * tp)
+                elif self.anim_t <= t2_end:
+                    tp = (self.anim_t - t1_end) / leg
+                    self.ball_pos = _lerp(first_pt, final_pt, tp)
+                    self.ball_h = 8.0 * math.sin(math.pi * tp)
+                else:
+                    self.ball_pos = final_pt
+                    self.ball_h = 0.0
+            else:
+                t_end = start + leg
+                if self.anim_t <= start:
+                    self.ball_pos = land
+                    self.ball_h = 0.0
+                elif self.anim_t <= t_end:
+                    tp = (self.anim_t - start) / leg
+                    self.ball_pos = _lerp(land, first_pt, tp)
+                    self.ball_h = 8.0 * math.sin(math.pi * tp)
+                else:
+                    self.ball_pos = first_pt
+                    self.ball_h = 0.0
 
         # 담당 수비수 이동
         fb = plan.get("field_by")
@@ -1335,6 +1393,8 @@ class PlayScene:
             self._draw_inning_change(s)
         if self.phase == P_ROUND_CLEAR:
             self._draw_round_clear(s)
+        if self.phase == P_PITCHER_CHANGE:
+            self._draw_pitcher_change(s)
         if self.paused:
             self._draw_pause_overlay(s)
         if self.show_pitcher_sub:
@@ -1701,6 +1761,25 @@ class PlayScene:
         self.pitcher_sub_hand_btn.draw(s)
         self.btn_pitcher_sub_confirm.draw(s)
         self.btn_pitcher_sub_cancel.draw(s)
+
+    def _draw_pitcher_change(self, s):
+        g = self.game
+        overlay = pygame.Surface((C.WIDTH, C.HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 130))
+        s.blit(overlay, (0, 0))
+        w, h = 420, 120
+        rect = pygame.Rect(0, 0, w, h)
+        rect.center = (C.WIDTH // 2, C.HEIGHT // 2)
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel.fill((12, 14, 20, 230))
+        s.blit(panel, rect.topleft)
+        pygame.draw.rect(s, C.BLUE, rect, width=4, border_radius=12)
+        draw_text(s, "투수교체", 46, rect.centerx, rect.centery - 18,
+                  C.BLUE, center=True, bold=True)
+        team = g.defending_team
+        hand = "우투" if g.pitcher_right[team] else "좌투"
+        draw_text(s, f"{g.pitchers[team]} ({hand})", 24,
+                  rect.centerx, rect.centery + 28, C.WHITE, center=True, bold=True)
 
     def _draw_inning_change(self, s):
         overlay = pygame.Surface((C.WIDTH, C.HEIGHT), pygame.SRCALPHA)
