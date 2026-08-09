@@ -99,8 +99,8 @@ HELP_LINES = [
     ("head", "게임 모드"),
     ("body", "· 1인 게임 (타격 챌린지): 혼자 타격만 합니다, CPU가 랜덤 구종·구속으로 투구"),
     ("body", "· 2인 게임: 한 명은 투수(구종 선택), 한 명은 타자(스페이스바 타격)"),
-    ("body", "  플레이어A(원정·파랑) 수비: [8] 패스트볼 [9] 슬라이더 [0] 커브"),
-    ("body", "  플레이어B(홈·빨강) 수비: [1] 패스트볼 [2] 슬라이더 [3] 커브"),
+    ("body", "  플레이어A(원정·빨강) 수비: [1] 패스트볼 [2] 슬라이더 [3] 커브"),
+    ("body", "  플레이어B(홈·파랑) 수비: [8] 패스트볼 [9] 슬라이더 [0] 커브"),
     ("body", "  공수교대 시 역할·유니폼 색이 바뀝니다"),
     ("body", "· 경기 전 라인업 화면에서 팀·선수 이름, 좌타/우타를 설정할 수 있습니다"),
     ("body", "  2인 기본 팀 이름: 플레이어A(원정) / 플레이어B(홈)"),
@@ -181,7 +181,7 @@ HELP_LINES = [
     ("gap", ""),
     ("head", "조작"),
     ("body", "· 타격: 스페이스바"),
-    ("body", "· 구종 선택(2인): A팀 8/9/0, B팀 1/2/3"),
+    ("body", "· 구종 선택(2인): A팀 1/2/3, B팀 8/9/0"),
     ("body", "· 일시정지: 우하단 버튼 또는 ESC → 계속하기 / 그만하기"),
     ("body", "· 게임 설명 스크롤: 마우스 휠 또는 ↑↓"),
     ("body", "· 메인 메뉴 「개발정보」에서 버전·개발자 정보 확인"),
@@ -692,7 +692,7 @@ class PlayScene:
 
     def _pitch_keys(self):
         """2인 모드 수비 팀별 구종 선택 키 (A=8/9/0, B=1/2/3)."""
-        if self.game.defending_team == 0:
+        if self.game.defending_team == 1:
             return PITCH_KEYS_A
         return PITCH_KEYS_B
 
@@ -703,8 +703,8 @@ class PlayScene:
             if key in keys:
                 return keys[key]
         if text:
-            ch = text.lower() if self.game.defending_team == 0 else text
-            letters = PITCH_LETTER_A if self.game.defending_team == 0 else PITCH_LETTER_B
+            ch = text.lower() if self.game.defending_team == 1 else text
+            letters = PITCH_LETTER_A if self.game.defending_team == 1 else PITCH_LETTER_B
             return letters.get(ch)
         return None
 
@@ -1730,7 +1730,7 @@ class PlayScene:
                       C.ACCENT2)
         self.btn_pitcher_sub.draw(s)
         draw_text(s, "구종을 선택하세요", 16, x + 12, y + 82, C.LIGHT_GRAY)
-        if g.defending_team == 0:
+        if g.defending_team == 1:
             labels = ("[8] 패스트볼", "[9] 슬라이더", "[0] 커브")
         else:
             labels = ("[1] 패스트볼", "[2] 슬라이더", "[3] 커브")
@@ -1998,22 +1998,11 @@ class GameOverScene:
                 self._draw_final_line(s, 410)
             else:
                 self._draw_final_line(s, 230)
-                if g.walk_off and g.score[1] > g.score[0]:
-                    msg = f"끝내기 승리!  {g.team_names[1]}"
-                    col = C.GOOD
-                elif g.score[0] > g.score[1]:
-                    msg = f"{g.team_names[0]} 승리!"
-                    col = C.GOOD
-                else:
-                    msg = f"{g.team_names[1]} 승리!"
-                    col = C.GOOD
-                draw_text(s, msg, 34, C.WIDTH // 2, 450,
-                          col, center=True, bold=True)
                 mvp = g.pick_mvp()
                 if mvp:
-                    draw_text(s, "BEST PLAYER", 22, C.WIDTH // 2, 492,
+                    draw_text(s, "BEST PLAYER", 22, C.WIDTH // 2, 360,
                               C.ACCENT2, center=True, bold=True)
-                    draw_text(s, mvp["line"], 20, C.WIDTH // 2, 522,
+                    draw_text(s, mvp["line"], 20, C.WIDTH // 2, 390,
                               C.WHITE, center=True, bold=True)
         for b in (self.btn_again, self.btn_menu):
             b.draw(s)

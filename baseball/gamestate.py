@@ -173,7 +173,7 @@ class LiveGame:
         """팀·타순별 타격 기록 문자열 (MVP 등)."""
         if name is None:
             name = self.lineups[team_idx][slot]
-        return f"{slot + 1}번 {name}  {self.format_batter_stats_compact(team_idx, slot)}"
+        return f"{name}  {self.format_batter_stats_compact(team_idx, slot)}"
 
     def current_batter_stats_compact(self):
         """현재 타석 타자의 팀별 기록(숫자만)."""
