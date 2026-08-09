@@ -642,12 +642,18 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
             return _foul_plan(roll_pt)
         gb_fielder = _outfielder_for(spray_deg)
         gb_of_depth = F.dist_ft(F.HOME, F.FIELDERS_HOME[gb_fielder])
-        # 1-2루간/3-유간(내야수 두 명 사이)은 항상 1루타로만 처리한다.
+        # 1-2루간/3-유간(내야수 두 명 사이)은 항상 1루타로만,
+        # 1루/3루 라인(베이스와 내야수 사이)은 항상 2루타로만 처리한다.
         in_mid_gap = (_GAP_3B_LINE_DEG < spray_deg <= _GAP_3B_SS_DEG
                      or _GAP_2B_1B_DEG < spray_deg <= _GAP_1B_LINE_DEG)
-        bases_n = 1 if in_mid_gap else (
-            2 if power > 0.58 and abs(spray_deg) > 15
-            and roll_dist > gb_of_depth else 1)
+        in_line = spray_deg <= _GAP_3B_LINE_DEG or spray_deg > _GAP_1B_LINE_DEG
+        if in_mid_gap:
+            bases_n = 1
+        elif in_line:
+            bases_n = 2
+        else:
+            bases_n = (2 if power > 0.58 and abs(spray_deg) > 15
+                      and roll_dist > gb_of_depth else 1)
         relay_fielder, relay_final = _relay_plan(bases_n, spray_deg)
         label = _gap_label(spray_deg) if bases_n == 1 else "2루타!"
         return dict(kind="hit", label=label,

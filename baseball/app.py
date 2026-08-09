@@ -919,10 +919,10 @@ class PlayScene:
                 self._gap_t1 = pass_dist / GAP_LEG1_SPEED
                 gap_t2 = max(0.0, total_dist - pass_dist) / GAP_LEG2_SPEED
                 self.t_flight = self._gap_t1 + gap_t2
-                # 내야수 몸을 그대로 관통하지 않도록, 통과 지점을 내야수 옆으로
-                # 살짝 밀어낸다 — 직선으로 뚫는 게 아니라 옆으로 비켜 나가는 궤적.
-                straight_mid = _lerp(field.HOME, plan["landing"], self._gap_pass_frac)
-                self._gap_mid = self._avoid_infielders(straight_mid)
+                # 방향이 도중에 꺾이지 않도록(외야수 쪽으로 휘어 보이는 문제)
+                # 처음 뻗어나간 방향 그대로 직진시킨다 — 옆으로 비켜가는 연출은
+                # 하지 않는다.
+                self._gap_mid = _lerp(field.HOME, plan["landing"], self._gap_pass_frac)
             throw = plan.get("throw_to") is not None and plan["kind"] in ("out", "hit", "error")
             self._dp_throw = bool(plan.get("double_play"))
             self._has_throw = throw and bt == "ground"
@@ -1487,20 +1487,6 @@ class PlayScene:
                 py += dy / dist * push
         return (px, py)
 
-    def _avoid_infielders(self, pt, min_dist=16.0):
-        """1-2루간/3-유간/라인 안타의 통과 지점이 내야수 몸을 관통하지 않도록
-        옆으로 밀어낸다(내야수 홈 포지션 기준)."""
-        px, py = pt
-        for name in ("1루수", "2루수", "유격수", "3루수"):
-            fx, fy = field.FIELDERS_HOME[name]
-            dx, dy = px - fx, py - fy
-            dist = math.hypot(dx, dy)
-            if 1e-3 < dist < min_dist:
-                push = min_dist - dist
-                px += dx / dist * push
-                py += dy / dist * push
-        return (px, py)
-
     def _draw_defense(self, s, jersey_color):
         for name, pos in self.fielder_positions.items():
             gside = -1 if name in ("3루수", "유격수", "좌익수") else 1
@@ -1645,9 +1631,9 @@ class PlayScene:
         draw_text(s, f"아웃 {outs_left}/{outs_max}", 18,
                   ox + w - 18, panel_y + 16, C.ACCENT, right=True, bold=True)
 
-        draw_text(s, f"{pts}", 40, ox + 90, panel_y + 58, C.FENCE_TOP,
+        draw_text(s, f"{pts}", 34, ox + 62, panel_y + 58, C.FENCE_TOP,
                   center=True, bold=True)
-        draw_text(s, "점", 18, ox + 140, panel_y + 60, C.LIGHT_GRAY)
+        draw_text(s, "점", 18, ox + 108, panel_y + 58, C.LIGHT_GRAY, center=True)
 
         bar_x, bar_y, bar_w, bar_h = ox + 200, panel_y + 46, w - 230, 16
         pygame.draw.rect(s, (20, 28, 48), (bar_x, bar_y, bar_w, bar_h),
@@ -1681,12 +1667,7 @@ class PlayScene:
         else:
             draw_text(s, g.half_label(), 18, bx, by + 22, C.WHITE, center=True,
                       bold=True)
-        if g.one_player:
-            outs_max = g.solo_outs_limit()
-            outs_left = g.solo_outs_left()
-            draw_text(s, f"남은 아웃 {outs_left}/{outs_max}", 18, bx, by + 44,
-                      C.LIGHT_GRAY, center=True)
-        else:
+        if not g.one_player:
             outs = "●" * g.outs + "○" * (C.OUTS_PER_INNING - g.outs)
             draw_text(s, f"아웃 {outs}", 18, bx, by + 44, C.LIGHT_GRAY, center=True)
 
@@ -1694,7 +1675,8 @@ class PlayScene:
         name, order = g.current_batter_name()
         hand = "우타" if g.batter_is_right() else "좌타"
         ty = by + 68
-        draw_text(s, f"타석: {order}번 {name} ({hand})", 17, bx, ty,
+        batter_label = f"{name} ({hand})" if g.one_player else f"{order}번 {name} ({hand})"
+        draw_text(s, f"타석: {batter_label}", 17, bx, ty,
                   C.BLACK, center=True, bold=True)
         if not g.one_player:
             line1, line2 = g.current_batter_stats_lines()
@@ -1974,8 +1956,6 @@ class GameOverScene:
         if g.one_player:
             draw_text(s, "게임 오버", 56, C.WIDTH // 2, 72, C.WHITE,
                       center=True, bold=True)
-            draw_text(s, "타격 챌린지 결과", 24, C.WIDTH // 2, 118,
-                      C.LIGHT_GRAY, center=True)
 
             pw, ph = 440, 300
             px = (C.WIDTH - pw) // 2
@@ -1986,7 +1966,6 @@ class GameOverScene:
             pygame.draw.rect(s, C.SCOREBOARD_LINE, (px, py, pw, ph),
                              width=3, border_radius=14)
 
-            cleared = g.solo_rounds_cleared
             draw_text(s, "최종 점수", 22, px + pw // 2, py + 36,
                       C.LIGHT_GRAY, center=True)
             draw_text(s, f"{g.solo_points}점", 52, px + pw // 2, py + 82,
@@ -1994,14 +1973,9 @@ class GameOverScene:
 
             draw_text(s, "진행 기록", 22, px + pw // 2, py + 148,
                       C.LIGHT_GRAY, center=True)
-            if cleared > 0:
-                draw_text(s, f"{cleared}라운드 클리어", 26, px + pw // 2, py + 182,
-                          C.GOOD, center=True, bold=True)
-            draw_text(s, f"{g.solo_round}라운드에서 탈락", 24, px + pw // 2, py + 218,
+            draw_text(s, f"{g.solo_round}라운드 아웃", 24, px + pw // 2, py + 186,
                       C.ACCENT2, center=True, bold=True)
-            draw_text(s, f"(목표 {g.solo_target()}점 · 아웃 소진)", 18,
-                      px + pw // 2, py + 252, C.LIGHT_GRAY, center=True)
-            draw_text(s, f"안타 {g.hits[1]}개", 20, px + pw // 2, py + 278,
+            draw_text(s, f"안타 {g.hits[1]}개", 20, px + pw // 2, py + 222,
                       C.LIGHT_GRAY, center=True)
         else:
             is_tie = g.game_tied or g.score[0] == g.score[1]
