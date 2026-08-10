@@ -602,6 +602,30 @@ def _outfield_shift_frac(name, landing):
     return min(0.44, 0.18 + 0.26 * max(0.0, alignment))
 
 
+_INFIELD_SHIFT_NAMES = ("1루수", "2루수", "유격수", "3루수")
+
+
+def _infield_shift_target(name, landing):
+    """2·3루타 중계 때 내야수가 타구 방향으로 살짝 붙는 목표 지점.
+
+    외야수처럼 거리 비율로 움직이면(먼 타구일수록) 수십 피트씩 뛰어가는
+    것처럼 보이므로, 내야수는 절대 거리로 3~14ft 정도만 자리를 잡는다.
+    """
+    hx, hy = field.FIELDERS_HOME[name]
+    lx, ly = landing
+    dx, dy = lx - hx, ly - hy
+    dist = math.hypot(dx, dy)
+    if dist < 1e-6:
+        return (hx, hy)
+    ld = math.hypot(lx, ly)
+    hd = math.hypot(hx, hy)
+    alignment = 0.0
+    if ld > 1e-6 and hd > 1e-6:
+        alignment = (hx / hd) * (lx / ld) + (hy / hd) * (ly / ld)
+    step = min(dist, 4.0 + 10.0 * max(0.0, alignment))
+    return (hx + dx / dist * step, hy + dy / dist * step)
+
+
 def _runner_pos(start_idx, end_idx, p):
     if end_idx == start_idx:
         return BASEPATH[start_idx]
@@ -1368,6 +1392,17 @@ class PlayScene:
                 home = field.FIELDERS_HOME[name]
                 frac = _outfield_shift_frac(name, land)
                 self.fielder_positions[name] = _lerp(home, land, frac * shift_p)
+
+        # 2·3루타 중계 상황: 내야수들도 가만히 있지 않고 타구 방향으로
+        # 외야수보다 훨씬 작은 폭으로 반응해 움직인다.
+        if self._of_relay:
+            infield_shift_p = min(1.0, p * 1.12)
+            for name in _INFIELD_SHIFT_NAMES:
+                if name == fb:
+                    continue
+                home = field.FIELDERS_HOME[name]
+                target = _infield_shift_target(name, land)
+                self.fielder_positions[name] = _lerp(home, target, infield_shift_p)
 
         if self._dp_throw:
             relay = plan["dp_relay"]
