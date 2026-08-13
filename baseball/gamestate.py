@@ -636,10 +636,6 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
                         double_play=False, sac_fly=False, error=False)
         # 내야 사이로 빠지는 안타 — 내야만 살짝 벗어난 정도로는 2루타가 안 되고,
         # 담당 외야수 뒤까지 굴러가야(외야수 수비 위치보다 멀리) 2루타가 된다.
-        roll_dist = min(roll + 80, fence - 10)
-        roll_pt = F.polar(roll_dist, spray_deg)
-        if F.is_foul_point(roll_pt):
-            return _foul_plan(roll_pt)
         gb_fielder = _outfielder_for(spray_deg)
         gb_of_depth = F.dist_ft(F.HOME, F.FIELDERS_HOME[gb_fielder])
         # 1-2루간/3-유간(내야수 두 명 사이)은 항상 1루타로만,
@@ -647,6 +643,15 @@ def resolve_batted_ball(power, spray_deg, launch_deg, bases, outs):
         in_mid_gap = (_GAP_3B_LINE_DEG < spray_deg <= _GAP_3B_SS_DEG
                      or _GAP_2B_1B_DEG < spray_deg <= _GAP_1B_LINE_DEG)
         in_line = spray_deg <= _GAP_3B_LINE_DEG or spray_deg > _GAP_1B_LINE_DEG
+        if in_mid_gap:
+            # 내야를 빠져나가는 단타는 외야수 정위치보다 한참 앞(얕은 외야)에서
+            # 멈춰야 외야수가 실제로 앞으로 달려나와 잡는 그림이 된다.
+            roll_dist = max(120.0, min(roll + 80, gb_of_depth - 40, fence - 10))
+        else:
+            roll_dist = min(roll + 80, fence - 10)
+        roll_pt = F.polar(roll_dist, spray_deg)
+        if F.is_foul_point(roll_pt):
+            return _foul_plan(roll_pt)
         if in_mid_gap:
             bases_n = 1
         elif in_line:

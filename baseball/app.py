@@ -48,7 +48,7 @@ REL_THROW_DELAY = 0.5   # 외야수가 공을 잡은(t_flight) 후 중계 송구
 REL_THROW_LEG = 0.85    # 중계 송구 한 구간(외야수→중계수비수, 중계수비수→3루수) 시간
 GAP_LEG1_FRAC = 0.55    # gap_pass_dist 정보가 없을 때(안전장치) 쓰는 기본 거리 비중
 GAP_LEG1_SPEED = 230.0  # 내야수를 스쳐 지나가기 전까지 속도(ft/s, 직선타 아웃과 비슷)
-GAP_LEG2_SPEED = 130.0  # 내야수를 지나 외야 쪽으로 흘러갈 때 속도(ft/s, 느려짐)
+GAP_LEG2_SPEED = 85.0   # 내야수를 지나 외야 쪽으로 흘러갈 때 속도(ft/s, 느려짐 — 외야수가 앞으로 달려나와 잡도록)
 UMPIRE_STEP_SPEED = 16.0  # 심판이 수비수를 피할 때 실제로 걸어서 움직이는 속도(ft/s)
 
 # 좌측 패널 위치(구종 선택 / S B O)
@@ -650,6 +650,16 @@ class PlayScene:
         self.balls = 0
         self.timer = 0.0
 
+        # 타석 표시용 캐시 — 결과가 확정되는 순간(apply_plan) 바로 다음
+        # 타자로 게임 상태가 넘어가버려도, 화면에는 이번 타석 결과 애니메이션이
+        # 다 끝날 때까지 방금 타석에 섰던 선수 정보를 계속 보여준다.
+        name, order = game.current_batter_name()
+        self._display_name = name
+        self._display_order = order
+        self._display_hand_right = game.batter_is_right()
+        self._display_stats_lines = (
+            game.current_batter_stats_lines() if not game.one_player else ("", ""))
+
         self.pitch_name = "패스트볼"
         self.pitch_speed = 0
         self.t = 0.0
@@ -772,6 +782,14 @@ class PlayScene:
         self._gap_pass_frac = GAP_LEG1_FRAC
         self._gap_t1 = 0.0
         self._gap_mid = field.HOME
+        # 이번에 타석에 들어서는 타자 정보로 표시 캐시 갱신(직전 타석 결과
+        # 애니메이션이 끝나기 전엔 이 값이 아니라 이전 캐시가 화면에 남아있다).
+        name, order = self.game.current_batter_name()
+        self._display_name = name
+        self._display_order = order
+        self._display_hand_right = self.game.batter_is_right()
+        if not self.game.one_player:
+            self._display_stats_lines = self.game.current_batter_stats_lines()
         if self.game.is_over():
             self.app.change_scene(GameOverScene(self.app, self.game))
             return
@@ -1364,12 +1382,15 @@ class PlayScene:
         fb = plan.get("field_by")
         if fb and fb in self.fielder_positions:
             home_pos = field.FIELDERS_HOME[fb]
+            fb_target = land
             if plan["kind"] == "out":
                 fp = min(1.0, p * 1.05)
             elif plan.get("ball_type") == "gap":
                 # 1-2루간/3-유간/라인 안타: 공이 내야를 완전히 빠져나가기
-                # 전까지는 담당 외야수가 미리 반응하지 않다가, 빠져나간
-                # 뒤에야 살짝 앞으로 걸어 나와 공을 잡는다.
+                # 전까지는 담당 외야수가 미리 반응하지 않다가, 빠져나간 뒤에
+                # 실제 낙구 지점(land)까지 움직인다. 1-2루간/3-유간은 낙구
+                # 지점 자체가 정위치보다 얕게 나오도록(gamestate 쪽에서)
+                # 조정되어 있어서 자연스럽게 전진하는 그림이 된다.
                 delay = self._gap_t1
                 span = max(0.3, (tf + 0.5) - delay)
                 fp = min(1.0, max(0.0, self.anim_t - delay) / span)
@@ -1379,7 +1400,7 @@ class PlayScene:
                 # 곳까지 일부러 느릿느릿 가는 것처럼 보인다. 수비수는 공이
                 # 떨어진 직후(t_flight + 짧은 여유) 안에 도착하도록 별도 페이스로.
                 fp = min(1.0, self.anim_t / max(0.3, tf + 0.5))
-            self.fielder_positions[fb] = _lerp(home_pos, land, fp)
+            self.fielder_positions[fb] = _lerp(home_pos, fb_target, fp)
             if self._dp_throw and self.anim_t > tf:
                 self.fielder_positions[fb] = land
 
@@ -1472,7 +1493,7 @@ class PlayScene:
         field.draw_umpire(s, self._ump_disp["1B"])
         field.draw_umpire(s, self._ump_disp["2B"])
         field.draw_umpire(s, self._ump_disp["3B"])
-        field.draw_batter(s, right_handed=self.game.batter_is_right(),
+        field.draw_batter(s, right_handed=self._display_hand_right,
                           swing=self.swing_progress or 0.0, jersey_color=off_col)
 
         if self.phase == P_BATTED or (
@@ -1706,15 +1727,17 @@ class PlayScene:
             outs = "●" * g.outs + "○" * (C.OUTS_PER_INNING - g.outs)
             draw_text(s, f"아웃 {outs}", 18, bx, by + 44, C.LIGHT_GRAY, center=True)
 
-        # 타자 — 이닝/아웃 표시 아래(우측)
-        name, order = g.current_batter_name()
-        hand = "우타" if g.batter_is_right() else "좌타"
+        # 타자 — 이닝/아웃 표시 아래(우측). 결과 애니메이션이 끝나기 전엔
+        # 게임 상태가 이미 다음 타자로 넘어가 있어도, 화면은 이번에 실제로
+        # 타석에 섰던 선수 정보(캐시)를 계속 보여준다.
+        name, order = self._display_name, self._display_order
+        hand = "우타" if self._display_hand_right else "좌타"
         ty = by + 68
         batter_label = f"{name} ({hand})" if g.one_player else f"{order}번 {name} ({hand})"
         draw_text(s, f"타석: {batter_label}", 17, bx, ty,
                   C.BLACK, center=True, bold=True)
         if not g.one_player:
-            line1, line2 = g.current_batter_stats_lines()
+            line1, line2 = self._display_stats_lines
             ty += 20
             draw_text(s, line1, 15, bx, ty, C.BLACK, center=True)
             ty += 18
