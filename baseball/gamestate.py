@@ -7,12 +7,14 @@ from . import field as F
 
 
 def solo_target_for_round(round_num):
-    """라운드별 누적 목표 점수(구간마다 필요 점수가 점점 증가)."""
+    """라운드별 누적 목표 점수(구간마다 필요 점수가 점점 증가, 상승폭은 최대치에서 고정)."""
     if round_num <= 1:
         return C.SOLO_ROUND_BASE
     target = C.SOLO_ROUND_BASE
     for i in range(round_num - 1):
-        target += C.SOLO_ROUND_GAP_START + C.SOLO_ROUND_GAP_STEP * i
+        gap = min(C.SOLO_ROUND_GAP_START + C.SOLO_ROUND_GAP_STEP * i,
+                  C.SOLO_ROUND_GAP_MAX)
+        target += gap
     return target
 
 
@@ -111,9 +113,10 @@ class LiveGame:
         return max(0, self.solo_round - 1)
 
     def solo_outs_limit(self):
-        """현재 라운드 허용 아웃 수(라운드가 올라갈수록 감소)."""
-        dec = (self.solo_round - 1) * C.SOLO_OUTS_STEP
-        return max(C.SOLO_OUTS_MIN, C.SOLO_OUTS_START - dec)
+        """현재 라운드 허용 아웃 수(SOLO_OUTS_ROUND_INTERVAL 라운드 클리어마다 감소)."""
+        cleared = self.solo_round - 1
+        steps = cleared // C.SOLO_OUTS_ROUND_INTERVAL
+        return max(C.SOLO_OUTS_MIN, C.SOLO_OUTS_START - steps * C.SOLO_OUTS_STEP)
 
     def solo_outs_left(self):
         return max(0, self.solo_outs_limit() - self.solo_outs_used)
@@ -133,7 +136,11 @@ class LiveGame:
         self.solo_last_gain = pts
         if pts > 0:
             self.solo_points += pts
-        while self.solo_points >= self.solo_target():
+        if self.solo_points >= self.solo_target():
+            # 목표를 초과 달성해도 초과분은 버리고 방금 클리어한 목표 지점에서
+            # 다음 라운드를 시작한다(만루 홈런 등으로 목표를 훌쩍 넘겨도
+            # 그 초과분이 다음 라운드로 그대로 넘어가지 않도록).
+            self.solo_points = self.solo_target()
             self._solo_advance_round()
 
     def _solo_advance_round(self):

@@ -16,6 +16,8 @@ PITCHES = {
     "슬라이더": dict(speed=(125, 132)),
     "커브": dict(speed=(112, 123)),
 }
+# 1인 모드 CPU 투구 구종 확률(패스트볼 위주, 나머지는 슬라이더/커브가 균등 분배)
+SOLO_PITCH_WEIGHTS = {"패스트볼": 0.65, "슬라이더": 0.175, "커브": 0.175}
 PITCH_KEYS_B = {pygame.K_1: "패스트볼", pygame.K_2: "슬라이더", pygame.K_3: "커브"}
 PITCH_KEYS_A = {pygame.K_8: "패스트볼", pygame.K_9: "슬라이더", pygame.K_0: "커브"}
 PITCH_LETTER_A = {"8": "패스트볼", "9": "슬라이더", "0": "커브"}
@@ -795,7 +797,9 @@ class PlayScene:
             return
         # 투수: 1인 모드는 항상 CPU 랜덤 구종, 2인은 수비 플레이어가 선택
         if self.game.one_player:
-            self.pitch_name = random.choice(list(PITCHES.keys()))
+            names = list(SOLO_PITCH_WEIGHTS.keys())
+            weights = list(SOLO_PITCH_WEIGHTS.values())
+            self.pitch_name = random.choices(names, weights=weights, k=1)[0]
             self._roll_speed()
             self.phase = P_READY
             self.timer = 0.55
@@ -1344,11 +1348,15 @@ class PlayScene:
         # 맞춰) 베이스가 아니라 근처 내야수(2루수/유격수, 3루타는 3루수까지 한
         # 번 더)에게 공을 준다. 결과에는 영향 없이 그림만 그린다.
         if self._of_relay and self.anim_t > tf:
-            first_pt = field.FIELDERS_HOME[self._of_relay_first]
+            # 중계 내야수도 실제로는(아래 내야수 반응 이동 로직 때문에) 정위치가
+            # 아니라 타구 방향으로 살짝 이동한 지점에 서 있으므로, 송구 목표도
+            # 정위치가 아니라 그 이동 지점으로 맞춰야 공이 몸을 뚫고 지나가지
+            # 않는다.
+            first_pt = _infield_shift_target(self._of_relay_first, land)
             leg = REL_THROW_LEG
             start = tf + REL_THROW_DELAY
             if self._of_relay_final:
-                final_pt = field.FIELDERS_HOME[self._of_relay_final]
+                final_pt = _infield_shift_target(self._of_relay_final, land)
                 t1_end = start + leg
                 t2_end = t1_end + leg
                 if self.anim_t <= start:
@@ -1678,7 +1686,7 @@ class PlayScene:
         outs_left = g.solo_outs_left()
         outs_max = g.solo_outs_limit()
 
-        draw_text(s, "타격 챌린지", 20, ox + 18, panel_y + 16, C.ACCENT2,
+        draw_text(s, "타격 챌린지", 20, ox + 18, panel_y + 6, C.ACCENT2,
                   bold=True)
         draw_text(s, f"R{g.solo_round}", 22, ox + 150, panel_y + 16, C.WHITE,
                   center=True, bold=True)
@@ -1687,9 +1695,9 @@ class PlayScene:
         draw_text(s, f"아웃 {outs_left}/{outs_max}", 18,
                   ox + w - 18, panel_y + 16, C.ACCENT, right=True, bold=True)
 
-        draw_text(s, f"{pts}", 34, ox + 62, panel_y + 58, C.FENCE_TOP,
+        draw_text(s, f"{pts}", 34, ox + 70, panel_y + 58, C.FENCE_TOP,
                   center=True, bold=True)
-        draw_text(s, "점", 18, ox + 108, panel_y + 58, C.LIGHT_GRAY, center=True)
+        draw_text(s, "점", 18, ox + 140, panel_y + 58, C.LIGHT_GRAY, center=True)
 
         bar_x, bar_y, bar_w, bar_h = ox + 200, panel_y + 46, w - 230, 16
         pygame.draw.rect(s, (20, 28, 48), (bar_x, bar_y, bar_w, bar_h),

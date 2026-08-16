@@ -77,12 +77,14 @@ DEFAULT_TEAM_AWAY = "플레이어A"
 DEFAULT_TEAM_HOME = "플레이어B"
 
 # 1인 모드 (타격 챌린지) — 누적 점수·라운드별 아웃·목표
-SOLO_OUTS_START = 10           # 1라운드 아웃
-SOLO_OUTS_MIN = 5              # 최소 아웃 (6라운드 이후)
-SOLO_OUTS_STEP = 1             # 라운드마다 아웃 1개 감소
+SOLO_OUTS_START = 8            # 1라운드 아웃
+SOLO_OUTS_MIN = 5              # 최소 아웃(항상 이 이하로는 안 줄어듦)
+SOLO_OUTS_STEP = 1             # 감소 단위
+SOLO_OUTS_ROUND_INTERVAL = 3   # 이만큼 라운드를 클리어할 때마다 아웃카운트 감소
 SOLO_ROUND_BASE = 300          # 1라운드 목표 (누적)
-SOLO_ROUND_GAP_START = 400     # 1→2 라운드 구간 (+400)
-SOLO_ROUND_GAP_STEP = 100      # 라운드마다 구간 +100 (2→3 +500, 3→4 +600 …)
+SOLO_ROUND_GAP_START = 350     # 1→2 라운드 상승폭
+SOLO_ROUND_GAP_STEP = 50       # 라운드마다 상승폭 +50 (2→3 +400, 3→4 +450 …)
+SOLO_ROUND_GAP_MAX = 650       # 상승폭 최대 캡(이후로는 계속 +650만)
 SOLO_HIT_POINTS = {1: 30, 2: 50, 3: 70, 4: 100}
 SOLO_RUN_POINTS = 50
 
