@@ -87,6 +87,7 @@ SOLO_ROUND_GAP_STEP = 50       # 라운드마다 상승폭 +50 (2→3 +400, 3→
 SOLO_ROUND_GAP_MAX = 650       # 상승폭 최대 캡(이후로는 계속 +650만)
 SOLO_HIT_POINTS = {1: 30, 2: 50, 3: 70, 4: 100}
 SOLO_RUN_POINTS = 50
+SOLO_WALK_POINTS = 30
 
 # 2인 모드 기본 라인업(1~9번). 사용자가 자유롭게 바꿀 수 있다.
 DEFAULT_LINEUP = [f"플레이어{i}" for i in range(1, 10)]

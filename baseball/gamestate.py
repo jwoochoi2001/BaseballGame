@@ -337,7 +337,7 @@ class LiveGame:
         runs = self._walk_advance()
         score_before = tuple(self.score)
         if self.one_player:
-            self._solo_award_points(runs * C.SOLO_RUN_POINTS)
+            self._solo_award_points(C.SOLO_WALK_POINTS + runs * C.SOLO_RUN_POINTS)
         elif runs:
             self._add_runs(runs)
         self._record_plate_appearance(walk=True)
