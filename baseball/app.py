@@ -373,7 +373,7 @@ TEAM_LABEL_COLORS = (C.TEAM_AWAY, C.TEAM_HOME)
 
 
 class LineupScene:
-    def __init__(self, app, one_player):
+    def __init__(self, app, one_player, prefill_game=None):
         self.app = app
         self.one_player = one_player
         self.inputs = []
@@ -381,9 +381,12 @@ class LineupScene:
         self.hand_btns = []
         self.pitcher_inputs = []
         if one_player:
-            # 1인: 타자 한 명만 설정
-            self.names = [C.DEFAULT_1P_BATTER]
-            self.right = [C.DEFAULT_1P_RIGHT]
+            # 1인: 타자 한 명만 설정 (직전 경기가 있으면 그 이름으로 미리 채운다)
+            self._name_default = (prefill_game.lineups[1][0] if prefill_game
+                                  else C.DEFAULT_1P_BATTER)
+            self.names = [self._name_default]
+            self.right = [prefill_game.right[1][0] if prefill_game
+                         else C.DEFAULT_1P_RIGHT]
             cx = C.WIDTH // 2
             self.inputs.append(TextInput((cx - 160, 320, 320, 56),
                                          text=self.names[0], max_len=8))
@@ -397,16 +400,30 @@ class LineupScene:
                                    color=C.PANEL, hover=C.GRAY)
         else:
             # 2인: 원정팀·홈팀 각각 팀 이름 + 1~9번 라인업 + 선발투수
-            self.names = [list(C.DEFAULT_LINEUP_AWAY), list(C.DEFAULT_LINEUP_HOME)]
-            self.right = [list(C.DEFAULT_RIGHT_AWAY), list(C.DEFAULT_RIGHT_HOME)]
-            self.pitcher_right = [C.DEFAULT_PITCHER_RIGHT_AWAY,
-                                  C.DEFAULT_PITCHER_RIGHT_HOME]
+            # (직전 경기가 있으면 그 라인업으로 미리 채운다)
+            if prefill_game:
+                self.names = [list(prefill_game.lineups[0]),
+                              list(prefill_game.lineups[1])]
+                self.right = [list(prefill_game.right[0]),
+                             list(prefill_game.right[1])]
+                self.pitcher_right = list(prefill_game.starting_pitcher_right)
+                team_defaults = tuple(prefill_game.team_names)
+                # 최종 등판 투수가 아니라 그 경기의 "선발" 투수 이름·투구 손으로 채운다
+                pitcher_defaults = tuple(prefill_game.starting_pitchers)
+            else:
+                self.names = [list(C.DEFAULT_LINEUP_AWAY), list(C.DEFAULT_LINEUP_HOME)]
+                self.right = [list(C.DEFAULT_RIGHT_AWAY), list(C.DEFAULT_RIGHT_HOME)]
+                self.pitcher_right = [C.DEFAULT_PITCHER_RIGHT_AWAY,
+                                      C.DEFAULT_PITCHER_RIGHT_HOME]
+                team_defaults = (C.DEFAULT_TEAM_AWAY, C.DEFAULT_TEAM_HOME)
+                pitcher_defaults = (C.DEFAULT_PITCHER_AWAY, C.DEFAULT_PITCHER_HOME)
+            self._name_defaults = (list(self.names[0]), list(self.names[1]))
+            self._team_defaults = team_defaults
+            self._pitcher_defaults = pitcher_defaults
             self.inputs = [[], []]
             self.hand_btns = [[], []]
             self.pitcher_hand_btns = []
             self.lineup_top = 168
-            team_defaults = (C.DEFAULT_TEAM_AWAY, C.DEFAULT_TEAM_HOME)
-            pitcher_defaults = (C.DEFAULT_PITCHER_AWAY, C.DEFAULT_PITCHER_HOME)
             for t in range(2):
                 cx0 = LINEUP_COL_X[t]
                 # 선수 이름 칸(가운데 = cx0+139)과 좌우 중앙이 맞도록 배치
@@ -475,32 +492,33 @@ class LineupScene:
 
     def _start(self):
         if self.one_player:
-            name = self.inputs[0].text.strip() or C.DEFAULT_1P_BATTER
+            name = self.inputs[0].text.strip() or self._name_default
             lineups = [list(C.DEFAULT_LINEUP), [name]]
             team_names = ["상대팀", "우리팀"]
             rights = [list(C.DEFAULT_RIGHT), list(self.right)]
             pitchers = ["", ""]
         else:
-            default_lineups = (C.DEFAULT_LINEUP_AWAY, C.DEFAULT_LINEUP_HOME)
             lineups = [
-                [inp.text.strip() or default_lineups[t][i]
+                [inp.text.strip() or self._name_defaults[t][i]
                  for i, inp in enumerate(self.inputs[t])]
                 for t in range(2)
             ]
             team_names = [
-                self.team_inputs[0].text.strip() or C.DEFAULT_TEAM_AWAY,
-                self.team_inputs[1].text.strip() or C.DEFAULT_TEAM_HOME,
+                self.team_inputs[0].text.strip() or self._team_defaults[0],
+                self.team_inputs[1].text.strip() or self._team_defaults[1],
             ]
             rights = [list(self.right[0]), list(self.right[1])]
             pitchers = [
-                self.pitcher_inputs[0].text.strip() or C.DEFAULT_PITCHER_AWAY,
-                self.pitcher_inputs[1].text.strip() or C.DEFAULT_PITCHER_HOME,
+                self.pitcher_inputs[0].text.strip() or self._pitcher_defaults[0],
+                self.pitcher_inputs[1].text.strip() or self._pitcher_defaults[1],
             ]
         game = LiveGame(self.one_player, lineups, team_names)
         game.right = rights
         game.pitchers = pitchers
+        game.starting_pitchers = list(pitchers)
         game.pitcher_right = (list(self.pitcher_right) if not self.one_player
                               else [True, True])
+        game.starting_pitcher_right = list(game.pitcher_right)
         self.app.change_scene(PlayScene(self.app, game))
 
     def update(self, dt):
@@ -1976,8 +1994,9 @@ class GameOverScene:
         # 2인 모드는 "기록" 버튼이 전광판 바로 아래, 다시하기/메뉴 버튼 위에 오도록
         # 버튼 행 자체를 조금 아래로 내린다.
         btn_row_y = 560 if game.one_player else 616
-        self.btn_again = Button((C.WIDTH // 2 - 230, btn_row_y, 210, 60),
-                                again_label, size=28)
+        # "다시하기" = 방금 경기한 라인업을 그대로 채운 라인업 설정 화면으로 이동
+        self.btn_replay = Button((C.WIDTH // 2 - 230, btn_row_y, 210, 60),
+                                 again_label, size=28)
         self.btn_menu = Button((C.WIDTH // 2 + 20, btn_row_y, 210, 60),
                                quit_label, size=28)
         self.show_stats = False
@@ -1997,18 +2016,22 @@ class GameOverScene:
                 if self.btn_stats_close.clicked(e):
                     self.show_stats = False
             return
-        buttons = [self.btn_again, self.btn_menu]
+        buttons = [self.btn_replay, self.btn_menu]
         if self.btn_stats:
             buttons.append(self.btn_stats)
         for b in buttons:
             b.update(mouse)
         for e in events:
-            if self.btn_again.clicked(e):
-                self.app.change_scene(LineupScene(self.app, self.game.one_player))
+            if self.btn_replay.clicked(e):
+                self._restart_same_lineup()
             elif self.btn_menu.clicked(e):
                 self.app.change_scene(MenuScene(self.app))
             elif self.btn_stats and self.btn_stats.clicked(e):
                 self.show_stats = True
+
+    def _restart_same_lineup(self):
+        self.app.change_scene(LineupScene(self.app, self.game.one_player,
+                                          prefill_game=self.game))
 
     def update(self, dt):
         pass
@@ -2070,7 +2093,7 @@ class GameOverScene:
                               C.ACCENT2, center=True, bold=True)
                     draw_text(s, mvp["line"], 20, C.WIDTH // 2, 390,
                               C.WHITE, center=True, bold=True)
-        for b in (self.btn_again, self.btn_menu):
+        for b in (self.btn_replay, self.btn_menu):
             b.draw(s)
         if self.btn_stats:
             self.btn_stats.draw(s)

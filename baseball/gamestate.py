@@ -49,6 +49,10 @@ class LiveGame:
         # 팀별 선발투수 이름·투구 손(표시용, 실제 투구 로직에는 영향 없음)
         self.pitchers = ["", ""]
         self.pitcher_right = [True, True]
+        # 경기 중 투수 교체가 일어나도 바뀌지 않는 "선발투수" 이름·투구 손
+        # (다시하기 시 최종 등판 투수가 아니라 이 값을 라인업 프리필에 사용한다)
+        self.starting_pitchers = ["", ""]
+        self.starting_pitcher_right = [True, True]
 
         if one_player:
             self.batting_team = 1
